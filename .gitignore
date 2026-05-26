@@ -1,0 +1,21 @@
+# Go
+backend/bin/
+backend/*.exe
+backend/vendor/
+
+# Node
+frontend/node_modules/
+frontend/build/
+
+# Env
+.env
+.env.local
+*.env
+
+# Docker
+postgres_data/
+
+# IDE
+.cursor/
+.vscode/
+*.swp
