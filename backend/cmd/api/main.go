@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,11 +18,13 @@ import (
 	appMiddleware "github.com/AnsiMauludina/flowforge/internal/middleware"
 	"github.com/AnsiMauludina/flowforge/internal/model"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
+	"github.com/AnsiMauludina/flowforge/internal/scheduler"
 	appWS "github.com/AnsiMauludina/flowforge/internal/websocket"
 )
 
 func main() {
 	cfg := config.Load()
+	logger := log.New(os.Stdout, "", log.LstdFlags)
 
 	db, err := repository.NewDB(cfg.DBUrl)
 	if err != nil {
@@ -59,7 +62,7 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Init repositories & handler
+	// Init repositories
 	workflowRepo := repository.NewWorkflowRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
@@ -67,9 +70,31 @@ func main() {
 	hub := appWS.NewHub()
 	go hub.Run()
 
-	// Pass hub ke handler
+	// Init cron scheduler — triggerFn is wired after handler is created
+	// to avoid circular dependency. We use a function pointer wrapper.
+	var triggerFn scheduler.TriggerFn
+	sched := scheduler.New(func(wf *model.WorkflowDefinition, triggerType string) {
+		if triggerFn != nil {
+			triggerFn(wf, triggerType)
+		}
+	}, logger)
 
-	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret, hub)
+	// Init handler
+	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret, hub, sched)
+
+	// Wire the actual trigger function now that handler exists
+	triggerFn = func(wf *model.WorkflowDefinition, triggerType string) {
+		h.TriggerScheduled(wf, triggerType)
+	}
+
+	// Load all workflows with cron expressions from DB and schedule them
+	ctx := context.Background()
+	scheduled, err := workflowRepo.ListAllScheduled(ctx)
+	if err != nil {
+		logger.Printf("⚠️  Failed to load scheduled workflows: %v", err)
+	} else {
+		sched.LoadAll(scheduled)
+	}
 
 	// JWT middleware
 	jwtMW := appMiddleware.NewJWTMiddleware(
@@ -79,8 +104,9 @@ func main() {
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"version": "1.0.0",
+			"status":           "ok",
+			"version":          "1.0.0",
+			"scheduled_jobs":   sched.Count(),
 		})
 	})
 
@@ -141,6 +167,10 @@ func main() {
 	<-quit
 
 	fmt.Println("⏳ Shutting down...")
+
+	// Stop scheduler and wait for running cron jobs to finish
+	schedCtx := sched.Stop()
+	<-schedCtx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

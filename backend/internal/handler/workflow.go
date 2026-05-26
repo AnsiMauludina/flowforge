@@ -71,6 +71,14 @@ func (h *Handler) CreateWorkflow(c *gin.Context) {
 		return
 	}
 
+	// Register cron job if expression is set
+	if h.scheduler != nil {
+		if err := h.scheduler.Add(workflow); err != nil {
+			// Non-fatal: workflow is created, just log the scheduling failure
+			c.Header("X-Schedule-Warning", err.Error())
+		}
+	}
+
 	successResponse(c, http.StatusCreated, workflow)
 }
 
@@ -139,6 +147,18 @@ func (h *Handler) UpdateWorkflow(c *gin.Context) {
 		return
 	}
 
+	// Re-register cron job with updated expression (Add replaces existing entry)
+	if h.scheduler != nil {
+		if workflow.CronExpression != "" {
+			if err := h.scheduler.Add(workflow); err != nil {
+				c.Header("X-Schedule-Warning", err.Error())
+			}
+		} else {
+			// Expression cleared — remove any existing schedule
+			h.scheduler.Remove(workflow.ID)
+		}
+	}
+
 	successResponse(c, http.StatusOK, workflow)
 }
 
@@ -155,6 +175,11 @@ func (h *Handler) DeleteWorkflow(c *gin.Context) {
 	); err != nil {
 		c.JSON(http.StatusInternalServerError, Response{Error: "failed to delete workflow"})
 		return
+	}
+
+	// Remove cron job when workflow is soft-deleted
+	if h.scheduler != nil {
+		h.scheduler.Remove(workflowID)
 	}
 
 	c.JSON(http.StatusOK, Response{Message: "workflow deleted"})
@@ -196,7 +221,7 @@ func (h *Handler) TriggerWorkflow(c *gin.Context) {
 
 	run := &model.WorkflowRun{
 		WorkflowID:  workflow.ID,
-		TenantID:    tenantID,
+		TenantID:    workflow.TenantID,
 		Status:      model.RunStatusPending,
 		TriggerType: "manual",
 	}
@@ -212,6 +237,24 @@ func (h *Handler) TriggerWorkflow(c *gin.Context) {
 		"status":  run.Status,
 		"message": "workflow triggered successfully",
 	})
+}
+
+// TriggerScheduled is called by the cron scheduler (not an HTTP handler).
+// It creates a run record and executes the workflow asynchronously.
+func (h *Handler) TriggerScheduled(wf *model.WorkflowDefinition, triggerType string) {
+	ctx := context.Background()
+
+	run := &model.WorkflowRun{
+		WorkflowID:  wf.ID,
+		TenantID:    wf.TenantID,
+		Status:      model.RunStatusPending,
+		TriggerType: triggerType,
+	}
+	if err := h.workflowRepo.CreateRun(ctx, run); err != nil {
+		return
+	}
+
+	go h.executeWorkflow(run.ID, wf)
 }
 
 func (h *Handler) GetWorkflowRuns(c *gin.Context) {

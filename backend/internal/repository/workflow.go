@@ -411,3 +411,40 @@ func (r *WorkflowRepository) GetHealthMetrics(
 		TotalRuns24h:     total24h,
 	}, nil
 }
+
+// ListAllScheduled returns all active workflows that have a cron expression set,
+// across all tenants. Used by the scheduler at startup.
+func (r *WorkflowRepository) ListAllScheduled(ctx context.Context) ([]model.WorkflowDefinition, error) {
+	query := `
+		SELECT id, tenant_id, name, description, dag, version,
+		       is_active, cron_expression, created_by, created_at, updated_at
+		FROM workflow_definitions
+		WHERE is_active = true
+		  AND cron_expression IS NOT NULL
+		  AND cron_expression != ''
+		ORDER BY created_at ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list scheduled workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var workflows []model.WorkflowDefinition
+	for rows.Next() {
+		var w model.WorkflowDefinition
+		var dagJSON string
+		if err := rows.Scan(
+			&w.ID, &w.TenantID, &w.Name, &w.Description,
+			&dagJSON, &w.Version, &w.IsActive, &w.CronExpression,
+			&w.CreatedBy, &w.CreatedAt, &w.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan scheduled workflow: %w", err)
+		}
+		if err := json.Unmarshal([]byte(dagJSON), &w.DAG); err != nil {
+			return nil, fmt.Errorf("unmarshal DAG: %w", err)
+		}
+		workflows = append(workflows, w)
+	}
+	return workflows, nil
+}
