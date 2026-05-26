@@ -8,16 +8,20 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-  secondary: 'bg-gray-100 hover:bg-gray-200 text-gray-900',
-  danger: 'bg-red-600 hover:bg-red-700 text-white',
-  ghost: 'hover:bg-gray-100 text-gray-700',
+  primary:
+    'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm shadow-indigo-200',
+  secondary:
+    'bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 border border-gray-200 shadow-sm',
+  danger:
+    'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-sm shadow-red-200',
+  ghost:
+    'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
 }
 
 const sizes = {
-  sm: 'px-3 py-1.5 text-sm',
+  sm: 'px-3 py-1.5 text-xs',
   md: 'px-4 py-2 text-sm',
-  lg: 'px-6 py-3 text-base',
+  lg: 'px-5 py-2.5 text-sm',
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -38,8 +42,8 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         className={`
-          inline-flex items-center justify-center gap-2
-          font-medium rounded-lg transition-colors
+          inline-flex items-center justify-center gap-1.5
+          font-medium rounded-lg transition-all duration-150
           disabled:opacity-50 disabled:cursor-not-allowed
           ${variants[variant]} ${sizes[size]} ${className}
         `}
@@ -48,7 +52,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {loading && (
           <Loader2
             data-testid="spinner"
-            className="w-4 h-4 animate-spin"
+            className="w-3.5 h-3.5 animate-spin"
           />
         )}
         {children}

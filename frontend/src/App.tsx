@@ -5,6 +5,7 @@ import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
 import WorkflowsPage from '@/pages/WorkflowsPage'
 import WorkflowDetailPage from '@/pages/WorkflowDetailPage'
+import CreateWorkflowPage from '@/pages/CreateWorkflowPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,16 @@ export default function App() {
             element={
               <PrivateRoute>
                 <WorkflowsPage />
+              </PrivateRoute>
+            }
+          />
+          {/* /workflows/new MUST be before /workflows/:id so React Router
+              doesn't treat "new" as a dynamic workflow ID */}
+          <Route
+            path="/workflows/new"
+            element={
+              <PrivateRoute>
+                <CreateWorkflowPage />
               </PrivateRoute>
             }
           />

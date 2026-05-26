@@ -19,15 +19,15 @@ export default function WorkflowsPage() {
 
   return (
     <Layout title="Workflows">
-      <div className="space-y-4">
+      <div className="space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
-            {data?.total ?? 0} workflows total
+          <p className="text-sm text-gray-400">
+            <span className="font-semibold text-gray-700">{data?.total ?? 0}</span> workflows total
           </p>
           <Link to="/workflows/new">
             <Button size="sm">
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
               New Workflow
             </Button>
           </Link>
@@ -35,69 +35,93 @@ export default function WorkflowsPage() {
 
         {/* List */}
         {isLoading ? (
-          <div className="flex justify-center py-12">
+          <div className="flex justify-center py-20">
             <Spinner size="lg" />
           </div>
         ) : !data?.data?.length ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <GitBranch className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <h3 className="text-gray-900 font-medium mb-1">No workflows yet</h3>
-            <p className="text-gray-400 text-sm mb-4">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-16 text-center">
+            <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <GitBranch className="w-7 h-7 text-gray-300" />
+            </div>
+            <h3 className="text-gray-800 font-semibold mb-1.5">No workflows yet</h3>
+            <p className="text-gray-400 text-sm mb-5">
               Create your first workflow to get started
             </p>
             <Link to="/workflows/new">
               <Button size="sm">
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 Create Workflow
               </Button>
             </Link>
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Workflow</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Version</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Schedule</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Actions</th>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    Workflow
+                  </th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    Version
+                  </th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    Schedule
+                  </th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    Status
+                  </th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    Actions
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {data.data.map((wf) => (
-                  <tr key={wf.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
+                  <tr
+                    key={wf.id}
+                    className="border-b border-gray-50 last:border-0 hover:bg-slate-50/70 transition-colors"
+                  >
+                    <td className="px-5 py-3.5">
                       <Link
                         to={`/workflows/${wf.id}`}
-                        className="font-medium text-gray-900 hover:text-blue-600"
+                        className="font-medium text-gray-900 hover:text-indigo-600 transition-colors"
                       >
                         {wf.name}
                       </Link>
                       {wf.description && (
-                        <p className="text-xs text-gray-400 mt-0.5">{wf.description}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">
+                          {wf.description}
+                        </p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-500">v{wf.version}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">
-                      {wf.cronExpression || '—'}
+                    <td className="px-5 py-3.5">
+                      <span className="text-xs font-mono text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md">
+                        v{wf.version}
+                      </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3.5">
+                      <span className="text-xs text-gray-400 font-mono">
+                        {wf.cronExpression || '—'}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5">
                       <Badge
                         status={wf.isActive ? 'success' : 'cancelled'}
                         label={wf.isActive ? 'Active' : 'Inactive'}
                       />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-1">
                         <Button
                           size="sm"
                           variant="ghost"
                           loading={triggerMutation.isPending}
                           onClick={() => triggerMutation.mutate(wf.id)}
-                          title="Trigger"
+                          title="Trigger run"
+                          className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                         >
-                          <Play className="w-3.5 h-3.5 text-green-600" />
+                          <Play className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           size="sm"
@@ -108,9 +132,10 @@ export default function WorkflowsPage() {
                               deleteMutation.mutate(wf.id)
                             }
                           }}
-                          title="Delete"
+                          title="Delete workflow"
+                          className="text-red-400 hover:bg-red-50 hover:text-red-600"
                         >
-                          <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </td>
@@ -121,8 +146,8 @@ export default function WorkflowsPage() {
 
             {/* Pagination */}
             {data.total > 20 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <p className="text-xs text-gray-500">
+              <div className="flex items-center justify-between px-5 py-3.5 border-t border-gray-100 bg-gray-50/50">
+                <p className="text-xs text-gray-400">
                   Page {page} of {Math.ceil(data.total / 20)}
                 </p>
                 <div className="flex gap-2">

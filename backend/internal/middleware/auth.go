@@ -128,6 +128,12 @@ func GenerateToken(
 	return token.SignedString([]byte(secret))
 }
 
+// ParseToken validates a JWT string and returns the claims.
+// Exported so WebSocket handler can validate tokens from query params.
+func ParseToken(tokenString, secret string) (*JWTClaims, error) {
+	return parseToken(tokenString, secret)
+}
+
 func parseToken(tokenString, secret string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		tokenString,

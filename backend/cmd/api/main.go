@@ -115,10 +115,12 @@ func main() {
 
 		// Metrics
 		protected.GET("/metrics", h.GetHealthMetrics)
-
-		// WebSocket
-		protected.GET("/ws", h.ServeWS)
 	}
+
+	// WebSocket — outside protected group because browsers cannot send
+	// Authorization headers during the WebSocket upgrade handshake.
+	// Token is validated via ?token= query param inside ServeWS.
+	v1.GET("/ws", h.ServeWS)
 
 	// Server
 	srv := &http.Server{

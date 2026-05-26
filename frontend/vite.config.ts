@@ -19,10 +19,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:8080',
-        ws: true,
+        ws: true, // forward WebSocket upgrades on /api/v1/ws through this proxy
       },
     },
   },

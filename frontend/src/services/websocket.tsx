@@ -6,19 +6,28 @@ class WebSocketService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
   private maxReconnectDelay = 30000
-  private url = ''
+  private currentToken = ''
+  private currentRunID: string | undefined
 
   connect(token: string, runID?: string) {
-    const base = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/api/v1'
-    this.url = `${base}/ws${runID ? `?run_id=${runID}` : ''}`
+    this.currentToken = token
+    this.currentRunID = runID
 
-    this.ws = new WebSocket(this.url)
+    // Build URL: in dev, use relative path so Vite proxy forwards it.
+    // In production (VITE_WS_URL is set), use the explicit base.
+    const wsBase = import.meta.env.VITE_WS_URL
+      ? import.meta.env.VITE_WS_URL
+      : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1`
+
+    const params = new URLSearchParams({ token })
+    if (runID) params.set('run_id', runID)
+    const url = `${wsBase}/ws?${params.toString()}`
+
+    this.ws = new WebSocket(url)
 
     this.ws.onopen = () => {
       console.log('✅ WebSocket connected')
       this.reconnectDelay = 1000
-      // Send auth token
-      this.ws?.send(JSON.stringify({ type: 'auth', token }))
     }
 
     this.ws.onmessage = (event) => {
@@ -32,7 +41,7 @@ class WebSocketService {
 
     this.ws.onclose = () => {
       console.log('WebSocket disconnected, reconnecting...')
-      this.scheduleReconnect(token, runID)
+      this.scheduleReconnect()
     }
 
     this.ws.onerror = (err) => {
@@ -64,19 +73,20 @@ class WebSocketService {
     }
   }
 
-  private scheduleReconnect(token: string, runID?: string) {
+  private scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectDelay = Math.min(
         this.reconnectDelay * 2,
-        this.maxReconnectDelay
+        this.maxReconnectDelay,
       )
-      this.connect(token, runID)
+      this.connect(this.currentToken, this.currentRunID)
     }, this.reconnectDelay)
   }
 
   disconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
     this.ws?.close()
     this.ws = null
   }

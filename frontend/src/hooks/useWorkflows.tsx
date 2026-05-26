@@ -28,7 +28,7 @@ export function useWorkflow(id: string) {
       )
       return data.data
     },
-    enabled: !!id,
+    enabled: !!id && id !== 'new',
   })
 }
 
@@ -85,18 +85,18 @@ export function useTriggerWorkflow() {
 }
 
 export function useWorkflowRuns(workflowId: string, page = 1) {
-    return useQuery({
-      queryKey: ['runs', workflowId, page],
-      queryFn: async () => {
-        const { data } = await api.get<PaginatedResponse<WorkflowRun>>(
-          `/workflows/${workflowId}/runs?page=${page}&limit=20`
-        )
-        return data
-      },
-      enabled: !!workflowId,
-      refetchInterval: 5000,
-    })
-  }
+  return useQuery({
+    queryKey: ['runs', workflowId, page],
+    queryFn: async () => {
+      const { data } = await api.get<PaginatedResponse<WorkflowRun>>(
+        `/workflows/${workflowId}/runs?page=${page}&limit=20`
+      )
+      return data
+    },
+    enabled: !!workflowId && workflowId !== 'new',
+    refetchInterval: 5000,
+  })
+}
 
 export function useHealthMetrics() {
   return useQuery({
