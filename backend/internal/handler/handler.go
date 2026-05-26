@@ -1,19 +1,23 @@
 package handler
 
 import (
+	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
 )
 
-// Handler holds all dependencies
 type Handler struct {
 	workflowRepo *repository.WorkflowRepository
 	userRepo     *repository.UserRepository
 	jwtSecret    string
 	validate     *validator.Validate
+	hub          WebSocketHub
 }
 
-// NewHandler creates a new handler
+type WebSocketHub interface {
+	BroadcastToRun(runID string, data interface{})
+}
+
 func NewHandler(
 	workflowRepo *repository.WorkflowRepository,
 	userRepo *repository.UserRepository,
@@ -27,17 +31,16 @@ func NewHandler(
 	}
 }
 
-// Response helpers
 type Response struct {
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
 }
 
-func successResponse(data interface{}) Response {
-	return Response{Data: data}
+func successResponse(c *gin.Context, code int, data interface{}) {
+	c.JSON(code, Response{Data: data})
 }
 
-func errorResponse(msg string) Response {
-	return Response{Error: msg}
+func errorResponse(c *gin.Context, code int, msg string) {
+	c.JSON(code, Response{Error: msg})
 }

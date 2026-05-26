@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/labstack/echo/v4"
 	"github.com/AnsiMauludina/flowforge/internal/model"
 )
 
@@ -21,7 +21,6 @@ type JWTConfig struct {
 	Secret string
 }
 
-// JWTClaims extends jwt.RegisteredClaims
 type JWTClaims struct {
 	UserID   string     `json:"user_id"`
 	TenantID string     `json:"tenant_id"`
@@ -30,66 +29,87 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// NewJWTMiddleware returns JWT auth middleware
-func NewJWTMiddleware(cfg JWTConfig) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			// Extract token from Authorization header
-			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				return echo.NewHTTPError(http.StatusUnauthorized, "missing authorization header")
-			}
-
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid authorization format")
-			}
-
-			tokenString := parts[1]
-
-			// Parse and validate token
-			claims, err := parseToken(tokenString, cfg.Secret)
-			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")
-			}
-
-			// Store claims in context
-			c.Set(ContextKeyUserID, claims.UserID)
-			c.Set(ContextKeyTenantID, claims.TenantID)
-			c.Set(ContextKeyRole, claims.Role)
-			c.Set(ContextKeyEmail, claims.Email)
-
-			return next(c)
+func NewJWTMiddleware(cfg JWTConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing authorization header",
+			})
+			return
 		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid authorization format",
+			})
+			return
+		}
+
+		claims, err := parseToken(parts[1], cfg.Secret)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid or expired token",
+			})
+			return
+		}
+
+		c.Set(ContextKeyUserID, claims.UserID)
+		c.Set(ContextKeyTenantID, claims.TenantID)
+		c.Set(ContextKeyRole, claims.Role)
+		c.Set(ContextKeyEmail, claims.Email)
+
+		c.Next()
 	}
 }
 
-// RequireRole returns middleware that checks user role
-func RequireRole(roles ...model.Role) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			userRole, ok := c.Get(ContextKeyRole).(model.Role)
-			if !ok {
-				return echo.NewHTTPError(http.StatusUnauthorized, "missing role")
-			}
-
-			for _, role := range roles {
-				if userRole == role {
-					return next(c)
-				}
-			}
-
-			return echo.NewHTTPError(http.StatusForbidden,
-				"insufficient permissions")
+func RequireRole(roles ...model.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userRole, exists := c.Get(ContextKeyRole)
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing role",
+			})
+			return
 		}
+
+		role, ok := userRole.(model.Role)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid role",
+			})
+			return
+		}
+
+		for _, r := range roles {
+			if role == r {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "insufficient permissions",
+		})
 	}
 }
 
-// GenerateToken creates a new JWT token
+func TenantIsolation() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID, exists := c.Get(ContextKeyTenantID)
+		if !exists || tenantID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing tenant context",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 func GenerateToken(
-	userID string,
-	tenantID string,
-	email string,
+	userID, tenantID, email string,
 	role model.Role,
 	secret string,
 ) (string, error) {
@@ -104,49 +124,46 @@ func GenerateToken(
 			Issuer:    "flowforge",
 		},
 	}
-
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
 
-func parseToken(tokenString string, secret string) (*JWTClaims, error) {
+func parseToken(tokenString, secret string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		tokenString,
 		&JWTClaims{},
 		func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, echo.NewHTTPError(
-					http.StatusUnauthorized,
-					"unexpected signing method",
-				)
+				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(secret), nil
 		},
 	)
-
 	if err != nil {
 		return nil, err
 	}
-
 	claims, ok := token.Claims.(*JWTClaims)
 	if !ok || !token.Valid {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+		return nil, jwt.ErrSignatureInvalid
 	}
-
 	return claims, nil
 }
 
-// GetUserID extracts user ID from context
-func GetUserID(c echo.Context) string {
-	return c.Get(ContextKeyUserID).(string)
+// Context helpers
+func GetUserID(c *gin.Context) string {
+	val, _ := c.Get(ContextKeyUserID)
+	str, _ := val.(string)
+	return str
 }
 
-// GetTenantID extracts tenant ID from context
-func GetTenantID(c echo.Context) string {
-	return c.Get(ContextKeyTenantID).(string)
+func GetTenantID(c *gin.Context) string {
+	val, _ := c.Get(ContextKeyTenantID)
+	str, _ := val.(string)
+	return str
 }
 
-// GetRole extracts role from context
-func GetRole(c echo.Context) model.Role {
-	return c.Get(ContextKeyRole).(model.Role)
+func GetRole(c *gin.Context) model.Role {
+	val, _ := c.Get(ContextKeyRole)
+	role, _ := val.(model.Role)
+	return role
 }

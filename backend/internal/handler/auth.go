@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
-	"github.com/AnsiMauludina/flowforge/internal/middleware"
+	"github.com/gin-gonic/gin"
+	appMiddleware "github.com/AnsiMauludina/flowforge/internal/middleware"
 	"github.com/AnsiMauludina/flowforge/internal/model"
 )
 
@@ -17,129 +17,113 @@ type RegisterRequest struct {
 	Role       model.Role `json:"role" validate:"required,oneof=admin editor viewer"`
 }
 
-// Register creates a new tenant + admin user
-func (h *Handler) Register(c echo.Context) error {
+func (h *Handler) Register(c *gin.Context) {
 	var req RegisterRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-	if err := h.validate.Struct(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if !bindAndValidate(c, &req, h.validate) {
+		return
 	}
 
-	ctx := c.Request().Context()
+	ctx := c.Request.Context()
 
-	// Check if slug already exists
 	existing, _ := h.userRepo.GetTenantBySlug(ctx, req.TenantSlug)
 	if existing != nil {
-		return echo.NewHTTPError(http.StatusConflict, "tenant slug already exists")
+		c.JSON(http.StatusConflict, Response{Error: "tenant slug already exists"})
+		return
 	}
 
-	// Create tenant
 	tenant := &model.Tenant{
 		Name: req.TenantName,
 		Slug: strings.ToLower(req.TenantSlug),
 	}
 	if err := h.userRepo.CreateTenant(ctx, tenant); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create tenant")
+		c.JSON(http.StatusInternalServerError, Response{Error: "failed to create tenant"})
+		return
 	}
 
-	// Create user
 	user := &model.User{
 		TenantID: tenant.ID,
 		Email:    req.Email,
 		Role:     req.Role,
 	}
 	if err := h.userRepo.Create(ctx, user, req.Password); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
+		c.JSON(http.StatusInternalServerError, Response{Error: "failed to create user"})
+		return
 	}
 
-	// Generate token
-	token, err := middleware.GenerateToken(
-		user.ID.String(),
-		tenant.ID.String(),
-		user.Email,
-		user.Role,
-		h.jwtSecret,
+	token, err := appMiddleware.GenerateToken(
+		user.ID.String(), tenant.ID.String(),
+		user.Email, user.Role, h.jwtSecret,
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
+		c.JSON(http.StatusInternalServerError, Response{Error: "failed to generate token"})
+		return
 	}
 
-	return c.JSON(http.StatusCreated, successResponse(model.AuthResponse{
+	successResponse(c, http.StatusCreated, model.AuthResponse{
 		Token: token,
 		User:  *user,
-	}))
+	})
 }
 
-// Login authenticates a user
-func (h *Handler) Login(c echo.Context) error {
+func (h *Handler) Login(c *gin.Context) {
 	var req struct {
 		TenantSlug string `json:"tenant_slug" validate:"required"`
 		Email      string `json:"email" validate:"required,email"`
 		Password   string `json:"password" validate:"required"`
 	}
 
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-	if err := h.validate.Struct(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if !bindAndValidate(c, &req, h.validate) {
+		return
 	}
 
-	ctx := c.Request().Context()
+	ctx := c.Request.Context()
 
-	// Get tenant
 	tenant, err := h.userRepo.GetTenantBySlug(ctx, req.TenantSlug)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+		c.JSON(http.StatusUnauthorized, Response{Error: "invalid credentials"})
+		return
 	}
 
-	// Get user
 	user, err := h.userRepo.GetByEmail(ctx, req.Email, tenant.ID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+		c.JSON(http.StatusUnauthorized, Response{Error: "invalid credentials"})
+		return
 	}
 
-	// Verify password
 	if !h.userRepo.VerifyPassword(user.PasswordHash, req.Password) {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+		c.JSON(http.StatusUnauthorized, Response{Error: "invalid credentials"})
+		return
 	}
 
-	// Generate token
-	token, err := middleware.GenerateToken(
-		user.ID.String(),
-		tenant.ID.String(),
-		user.Email,
-		user.Role,
-		h.jwtSecret,
+	token, err := appMiddleware.GenerateToken(
+		user.ID.String(), tenant.ID.String(),
+		user.Email, user.Role, h.jwtSecret,
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
+		c.JSON(http.StatusInternalServerError, Response{Error: "failed to generate token"})
+		return
 	}
 
-	return c.JSON(http.StatusOK, successResponse(model.AuthResponse{
+	successResponse(c, http.StatusOK, model.AuthResponse{
 		Token: token,
 		User:  *user,
-	}))
+	})
 }
 
-// Me returns current user info
-func (h *Handler) Me(c echo.Context) error {
-	userID := middleware.GetUserID(c)
+func (h *Handler) Me(c *gin.Context) {
+	userID := appMiddleware.GetUserID(c)
 
-	ctx := c.Request().Context()
-
-	// Parse UUID
-	from, err := parseUUID(userID)
+	id, err := parseUUID(userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+		c.JSON(http.StatusBadRequest, Response{Error: "invalid user id"})
+		return
 	}
 
-	user, err := h.userRepo.GetByID(ctx, from)
+	user, err := h.userRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		c.JSON(http.StatusNotFound, Response{Error: "user not found"})
+		return
 	}
 
-	return c.JSON(http.StatusOK, successResponse(user))
+	successResponse(c, http.StatusOK, user)
 }

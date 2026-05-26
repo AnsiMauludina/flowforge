@@ -9,19 +9,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/requestid"
+	"github.com/gin-gonic/gin"
 	"github.com/AnsiMauludina/flowforge/config"
 	"github.com/AnsiMauludina/flowforge/internal/handler"
 	appMiddleware "github.com/AnsiMauludina/flowforge/internal/middleware"
+	"github.com/AnsiMauludina/flowforge/internal/model"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
 )
 
 func main() {
-	// Load config
 	cfg := config.Load()
 
-	// Connect database
 	db, err := repository.NewDB(cfg.DBUrl)
 	if err != nil {
 		fmt.Printf("❌ Failed to connect DB: %v\n", err)
@@ -29,7 +29,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Run migrations
 	migrationSQL, err := os.ReadFile("migrations/001_init.sql")
 	if err != nil {
 		fmt.Printf("❌ Failed to read migration: %v\n", err)
@@ -40,73 +39,89 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup Echo
-	e := echo.New()
-	e.HideBanner = true
+	// Gin setup
+	if cfg.Env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
-	// Global middleware
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-	e.Use(middleware.RequestID())
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:3000"},
-		AllowMethods: []string{
-			http.MethodGet, http.MethodPost,
-			http.MethodPut, http.MethodDelete,
-		},
-		AllowHeaders: []string{
-			echo.HeaderContentType,
-			echo.HeaderAuthorization,
-		},
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	r.Use(requestid.New())
+
+	// CORS
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
 	}))
 
-	// Rate limiter
-	e.Use(middleware.RateLimiter(
-		middleware.NewRateLimiterMemoryStore(20),
-	))
+	// Init repositories & handler
+	workflowRepo := repository.NewWorkflowRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret)
+
+	// JWT middleware
+	jwtMW := appMiddleware.NewJWTMiddleware(
+		appMiddleware.JWTConfig{Secret: cfg.JWTSecret},
+	)
 
 	// Health check
-	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"version": "1.0.0",
 		})
 	})
 
-	// API v1 routes (handlers added next)
-	v1 := e.Group("/api/v1")
-	_ = v1
+	// API v1
+	v1 := r.Group("/api/v1")
 
-	fmt.Printf("🚀 FlowForge API running on port %s\n", cfg.Port)
+	// Public routes
+	auth := v1.Group("/auth")
+	auth.POST("/register", h.Register)
+	auth.POST("/login", h.Login)
 
-	// Graceful shutdown
+	// Protected routes
+	protected := v1.Group("")
+	protected.Use(jwtMW, appMiddleware.TenantIsolation())
+	{
+		// Auth
+		protected.GET("/auth/me", h.Me)
+
+		// Workflows
+		protected.GET("/workflows", h.ListWorkflows)
+		protected.POST("/workflows", h.CreateWorkflow,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+		protected.GET("/workflows/:id", h.GetWorkflow)
+		protected.PUT("/workflows/:id", h.UpdateWorkflow,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+		protected.DELETE("/workflows/:id", h.DeleteWorkflow,
+			appMiddleware.RequireRole(model.RoleAdmin))
+		protected.GET("/workflows/:id/versions", h.GetWorkflowVersions)
+		protected.POST("/workflows/:id/trigger", h.TriggerWorkflow,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+		protected.GET("/workflows/:id/runs", h.GetWorkflowRuns)
+
+		// Metrics
+		protected.GET("/metrics", h.GetHealthMetrics)
+	}
+
+	// Server
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: r,
+	}
+
 	go func() {
-		if err := e.Start(":" + cfg.Port); err != nil &&
+		fmt.Printf("🚀 FlowForge API running on port %s\n", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil &&
 			err != http.ErrServerClosed {
 			fmt.Printf("❌ Server error: %v\n", err)
 		}
 	}()
-
-	// Init repositories
-	workflowRepo := repository.NewWorkflowRepository(db)
-	userRepo := repository.NewUserRepository(db)
-
-	// Init handler
-	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret)
-
-	// Init JWT middleware
-	jwtMiddleware := appMiddleware.NewJWTMiddleware(
-		appMiddleware.JWTConfig{Secret: cfg.JWTSecret},
-	)
-
-	// Public routes
-	v1 = e.Group("/api/v1")
-	v1.POST("/auth/register", h.Register)
-	v1.POST("/auth/login", h.Login)
-
-	// Protected routes
-	protected := v1.Group("", jwtMiddleware, appMiddleware.TenantIsolation())
-	protected.GET("/auth/me", h.Me)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -116,7 +131,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := e.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		fmt.Printf("❌ Shutdown error: %v\n", err)
 	}
 	fmt.Println("✅ Server stopped")

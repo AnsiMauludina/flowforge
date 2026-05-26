@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 	"github.com/AnsiMauludina/flowforge/internal/model"
 )
 
@@ -13,9 +14,9 @@ func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
 }
 
-func parsePagination(c echo.Context) model.PaginationParams {
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+func parsePagination(c *gin.Context) model.PaginationParams {
+	page, _ := strconv.Atoi(c.Query("page"))
+	limit, _ := strconv.Atoi(c.Query("limit"))
 
 	if page < 1 {
 		page = 1
@@ -27,16 +28,18 @@ func parsePagination(c echo.Context) model.PaginationParams {
 	return model.PaginationParams{
 		Page:  page,
 		Limit: limit,
-		Sort:  c.QueryParam("sort"),
+		Sort:  c.Query("sort"),
 	}
 }
 
-func bindAndValidate(c echo.Context, req interface{}, v interface{ Struct(interface{}) error }) error {
-	if err := c.Bind(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+func bindAndValidate(c *gin.Context, req interface{}, v *validator.Validate) bool {
+	if err := c.ShouldBindJSON(req); err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "invalid request body"})
+		return false
 	}
 	if err := v.Struct(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, Response{Error: err.Error()})
+		return false
 	}
-	return nil
+	return true
 }
