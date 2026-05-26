@@ -1,5 +1,5 @@
 -- Tenants
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,
   slug VARCHAR(100) UNIQUE NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE tenants (
 );
 
 -- Users
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   email VARCHAR(255) NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE users (
 );
 
 -- Workflow definitions
-CREATE TABLE workflow_definitions (
+CREATE TABLE IF NOT EXISTS workflow_definitions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
@@ -33,8 +33,8 @@ CREATE TABLE workflow_definitions (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Workflow versions (for rollback)
-CREATE TABLE workflow_versions (
+-- Workflow versions
+CREATE TABLE IF NOT EXISTS workflow_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_id UUID NOT NULL REFERENCES workflow_definitions(id) ON DELETE CASCADE,
   version INTEGER NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE workflow_versions (
 );
 
 -- Workflow runs
-CREATE TABLE workflow_runs (
+CREATE TABLE IF NOT EXISTS workflow_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_id UUID NOT NULL REFERENCES workflow_definitions(id),
   tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -55,8 +55,8 @@ CREATE TABLE workflow_runs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Step runs (execution logs)
-CREATE TABLE step_runs (
+-- Step runs
+CREATE TABLE IF NOT EXISTS step_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id UUID NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
   step_id VARCHAR(255) NOT NULL,
@@ -72,8 +72,8 @@ CREATE TABLE step_runs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Webhook triggers
-CREATE TABLE webhooks (
+-- Webhooks
+CREATE TABLE IF NOT EXISTS webhooks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   workflow_id UUID NOT NULL REFERENCES workflow_definitions(id),
@@ -82,8 +82,8 @@ CREATE TABLE webhooks (
 );
 
 -- Indexes
-CREATE INDEX idx_workflow_definitions_tenant ON workflow_definitions(tenant_id);
-CREATE INDEX idx_workflow_runs_tenant ON workflow_runs(tenant_id);
-CREATE INDEX idx_workflow_runs_status ON workflow_runs(status);
-CREATE INDEX idx_step_runs_run_id ON step_runs(run_id);
-CREATE INDEX idx_workflow_runs_created ON workflow_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_definitions_tenant ON workflow_definitions(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_tenant ON workflow_runs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_step_runs_run_id ON step_runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created ON workflow_runs(created_at DESC);

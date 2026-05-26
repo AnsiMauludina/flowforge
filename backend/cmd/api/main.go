@@ -12,6 +12,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/AnsiMauludina/flowforge/config"
+	"github.com/AnsiMauludina/flowforge/internal/handler"
+	appMiddleware "github.com/AnsiMauludina/flowforge/internal/middleware"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
 )
 
@@ -84,6 +86,27 @@ func main() {
 			fmt.Printf("❌ Server error: %v\n", err)
 		}
 	}()
+
+	// Init repositories
+	workflowRepo := repository.NewWorkflowRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	// Init handler
+	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret)
+
+	// Init JWT middleware
+	jwtMiddleware := appMiddleware.NewJWTMiddleware(
+		appMiddleware.JWTConfig{Secret: cfg.JWTSecret},
+	)
+
+	// Public routes
+	v1 = e.Group("/api/v1")
+	v1.POST("/auth/register", h.Register)
+	v1.POST("/auth/login", h.Login)
+
+	// Protected routes
+	protected := v1.Group("", jwtMiddleware, appMiddleware.TenantIsolation())
+	protected.GET("/auth/me", h.Me)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
