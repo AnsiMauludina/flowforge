@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -30,6 +31,21 @@ func parsePagination(c *gin.Context) model.PaginationParams {
 		Limit: limit,
 		Sort:  c.Query("sort"),
 	}
+}
+
+// parseFilter extracts name and is_active query params.
+// ?is_active=true → filter active only
+// ?is_active=false → filter inactive only
+// (omitted) → all workflows (no is_active filter)
+func parseFilter(c *gin.Context) model.WorkflowFilter {
+	f := model.WorkflowFilter{
+		Name: strings.TrimSpace(c.Query("name")),
+	}
+	if raw := c.Query("is_active"); raw != "" {
+		v := raw == "true"
+		f.IsActive = &v
+	}
+	return f
 }
 
 func bindAndValidate(c *gin.Context, req interface{}, v *validator.Validate) bool {

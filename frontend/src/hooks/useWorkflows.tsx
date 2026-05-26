@@ -7,12 +7,23 @@ import type {
   PaginatedResponse,
 } from '@/types'
 
-export function useWorkflows(page = 1, limit = 20) {
+export interface WorkflowFilter {
+  name?: string
+  is_active?: 'true' | 'false' | ''
+}
+
+export function useWorkflows(page = 1, limit = 20, filter: WorkflowFilter = {}) {
   return useQuery({
-    queryKey: ['workflows', page, limit],
+    queryKey: ['workflows', page, limit, filter],
     queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+      })
+      if (filter.name) params.set('name', filter.name)
+      if (filter.is_active) params.set('is_active', filter.is_active)
       const { data } = await api.get<PaginatedResponse<WorkflowDefinition>>(
-        `/workflows?page=${page}&limit=${limit}`
+        `/workflows?${params.toString()}`
       )
       return data
     },

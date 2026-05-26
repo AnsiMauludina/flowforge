@@ -1,13 +1,23 @@
-import { defineConfig } from 'vite'
+import { defineConfig, createLogger } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+// Vite logs EPIPE / ECONNRESET as "ws proxy error" when a browser tab closes
+// or refreshes while a WebSocket/HMR connection is still open. These are
+// completely harmless — suppress them to keep the console clean.
+const SUPPRESS_PATTERNS = [/EPIPE/, /ECONNRESET/, /write EPIPE/]
+
+const logger = createLogger()
+const originalWarn = logger.warn.bind(logger)
+logger.warn = (msg, opts) => {
+  if (SUPPRESS_PATTERNS.some((re) => re.test(msg))) return
+  originalWarn(msg, opts)
+}
+
 export default defineConfig({
-  plugins: [
-    react(),
-    tailwindcss(),
-  ],
+  customLogger: logger,
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -20,15 +30,6 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
         ws: true,
-        configure: (proxy) => {
-          // EPIPE and ECONNRESET are normal: the browser closed the WebSocket
-          // before the proxy finished forwarding. Suppress to reduce noise.
-          proxy.on('error', (err: NodeJS.ErrnoException) => {
-            if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-              console.error('[proxy error]', err.message)
-            }
-          })
-        },
       },
     },
   },

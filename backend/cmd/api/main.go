@@ -64,6 +64,7 @@ func main() {
 
 	// Init repositories
 	workflowRepo := repository.NewWorkflowRepository(db)
+	webhookRepo := repository.NewWebhookRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
 	// Init WebSocket hub
@@ -80,7 +81,7 @@ func main() {
 	}, logger)
 
 	// Init handler
-	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret, hub, sched)
+	h := handler.NewHandler(workflowRepo, webhookRepo, userRepo, cfg.JWTSecret, hub, sched)
 
 	// Wire the actual trigger function now that handler exists
 	triggerFn = func(wf *model.WorkflowDefinition, triggerType string) {
@@ -139,9 +140,20 @@ func main() {
 			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
 		protected.GET("/workflows/:id/runs", h.GetWorkflowRuns)
 
+		// Webhooks (management — requires auth)
+		protected.POST("/workflows/:id/webhooks", h.CreateWebhook,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+		protected.GET("/workflows/:id/webhooks", h.ListWebhooks)
+		protected.DELETE("/webhooks/:webhook_id", h.DeleteWebhook,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+
 		// Metrics
 		protected.GET("/metrics", h.GetHealthMetrics)
 	}
+
+	// Webhook receive — PUBLIC, no JWT required.
+	// The caller authenticates via HMAC-SHA256 (X-Flowforge-Signature header).
+	v1.POST("/webhooks/:webhook_id/trigger", h.ReceiveWebhook)
 
 	// WebSocket — outside protected group because browsers cannot send
 	// Authorization headers during the WebSocket upgrade handshake.

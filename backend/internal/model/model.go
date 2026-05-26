@@ -106,6 +106,15 @@ type StepRun struct {
 	CreatedAt  time.Time              `db:"created_at" json:"created_at"`
 }
 
+// Webhook represents a registered webhook that can trigger a workflow
+type Webhook struct {
+	ID         uuid.UUID `db:"id" json:"id"`
+	TenantID   uuid.UUID `db:"tenant_id" json:"tenant_id"`
+	WorkflowID uuid.UUID `db:"workflow_id" json:"workflow_id"`
+	Secret     string    `db:"secret" json:"secret,omitempty"` // only returned on creation
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
+}
+
 // HealthMetrics for dashboard
 type HealthMetrics struct {
 	ActiveRuns       int     `json:"active_runs"`
@@ -120,6 +129,13 @@ type PaginationParams struct {
 	Page  int    `query:"page"`
 	Limit int    `query:"limit"`
 	Sort  string `query:"sort"`
+}
+
+// WorkflowFilter holds optional search / status filters for workflow listing.
+// IsActive: nil = all, true = active only, false = inactive only.
+type WorkflowFilter struct {
+	Name     string `query:"name"`
+	IsActive *bool  `query:"is_active"` // nil → no filter
 }
 
 type PaginatedResponse[T any] struct {

@@ -9,6 +9,7 @@ import (
 
 type Handler struct {
 	workflowRepo *repository.WorkflowRepository
+	webhookRepo  *repository.WebhookRepository
 	userRepo     *repository.UserRepository
 	jwtSecret    string
 	validate     *validator.Validate
@@ -22,6 +23,7 @@ type WebSocketHub interface {
 
 func NewHandler(
 	workflowRepo *repository.WorkflowRepository,
+	webhookRepo *repository.WebhookRepository,
 	userRepo *repository.UserRepository,
 	jwtSecret string,
 	hub WebSocketHub,
@@ -29,6 +31,7 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		workflowRepo: workflowRepo,
+		webhookRepo:  webhookRepo,
 		userRepo:     userRepo,
 		jwtSecret:    jwtSecret,
 		validate:     validator.New(),

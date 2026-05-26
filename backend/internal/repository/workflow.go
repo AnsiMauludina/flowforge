@@ -102,6 +102,7 @@ func (r *WorkflowRepository) List(
 	ctx context.Context,
 	tenantID uuid.UUID,
 	params model.PaginationParams,
+	filter model.WorkflowFilter,
 ) (*model.PaginatedResponse[model.WorkflowDefinition], error) {
 	if params.Page < 1 {
 		params.Page = 1
@@ -111,27 +112,47 @@ func (r *WorkflowRepository) List(
 	}
 	offset := (params.Page - 1) * params.Limit
 
+	// Build dynamic WHERE clause
+	args := []interface{}{tenantID} // $1 always = tenant_id
+	where := "WHERE tenant_id = $1"
+
+	if filter.IsActive != nil {
+		args = append(args, *filter.IsActive)
+		where += fmt.Sprintf(" AND is_active = $%d", len(args))
+	} else {
+		// default: only active workflows (preserve original behaviour when no filter)
+		where += " AND is_active = true"
+	}
+
+	if filter.Name != "" {
+		args = append(args, "%"+filter.Name+"%")
+		where += fmt.Sprintf(" AND name ILIKE $%d", len(args))
+	}
+
 	// Count total
 	var total int64
-	countQuery := `
-		SELECT COUNT(*) FROM workflow_definitions
-		WHERE tenant_id = $1 AND is_active = true
-	`
-	if err := r.db.QueryRowContext(ctx, countQuery, tenantID).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM workflow_definitions "+where,
+		args...,
+	).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count workflows: %w", err)
 	}
 
-	// Fetch page
-	query := `
-		SELECT id, tenant_id, name, description, dag, version,
-			   is_active, cron_expression, created_by, created_at, updated_at
-		FROM workflow_definitions
-		WHERE tenant_id = $1 AND is_active = true
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	// Fetch page — append LIMIT/OFFSET args after WHERE args
+	args = append(args, params.Limit, offset)
+	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
+	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
 
-	rows, err := r.db.QueryContext(ctx, query, tenantID, params.Limit, offset)
+	query := fmt.Sprintf(`
+		SELECT id, tenant_id, name, description, dag, version,
+		       is_active, cron_expression, created_by, created_at, updated_at
+		FROM workflow_definitions
+		%s
+		ORDER BY created_at DESC
+		LIMIT %s OFFSET %s
+	`, where, limitPlaceholder, offsetPlaceholder)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list workflows: %w", err)
 	}
@@ -142,12 +163,11 @@ func (r *WorkflowRepository) List(
 		var w model.WorkflowDefinition
 		var dagJSON string
 
-		err := rows.Scan(
+		if err := rows.Scan(
 			&w.ID, &w.TenantID, &w.Name, &w.Description,
 			&dagJSON, &w.Version, &w.IsActive, &w.CronExpression,
 			&w.CreatedBy, &w.CreatedAt, &w.UpdatedAt,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, fmt.Errorf("scan workflow: %w", err)
 		}
 

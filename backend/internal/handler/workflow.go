@@ -21,7 +21,7 @@ func (h *Handler) ListWorkflows(c *gin.Context) {
 	}
 
 	result, err := h.workflowRepo.List(
-		c.Request.Context(), tenantID, parsePagination(c),
+		c.Request.Context(), tenantID, parsePagination(c), parseFilter(c),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{Error: "failed to list workflows"})
