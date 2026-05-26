@@ -19,7 +19,16 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        ws: true, // forward WebSocket upgrades on /api/v1/ws through this proxy
+        ws: true,
+        configure: (proxy) => {
+          // EPIPE and ECONNRESET are normal: the browser closed the WebSocket
+          // before the proxy finished forwarding. Suppress to reduce noise.
+          proxy.on('error', (err: NodeJS.ErrnoException) => {
+            if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+              console.error('[proxy error]', err.message)
+            }
+          })
+        },
       },
     },
   },
