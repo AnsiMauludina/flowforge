@@ -133,13 +133,13 @@ func executeScriptStep(
 	step *StepDefinition,
 	input map[string]interface{},
 ) (map[string]interface{}, error) {
-	script, ok := step.Config["script"].(string)
-	if !ok || script == "" {
-		return nil, fmt.Errorf("script step '%s' has no script", step.ID)
+	code, ok := step.Config["code"].(string)
+	if !ok || code == "" {
+		return nil, fmt.Errorf("script step '%s' missing 'code' in config", step.ID)
 	}
 
 	// Security: only allow bash scripts, no shell injection
-	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	cmd := exec.CommandContext(ctx, "bash", "-c", code)
 
 	// Pass input as env vars
 	for k, v := range input {

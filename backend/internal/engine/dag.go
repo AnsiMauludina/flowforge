@@ -175,6 +175,10 @@ func validateStepConfig(step *StepDefinition) error {
 		if _, ok := step.Config["url"]; !ok {
 			return fmt.Errorf("HTTP step '%s' missing 'url' in config", step.ID)
 		}
+	case StepTypeScript:
+		if _, ok := step.Config["code"]; !ok {
+			return fmt.Errorf("script step '%s' missing 'code' in config", step.ID)
+		}
 	case StepTypeDelay:
 		if _, ok := step.Config["duration"]; !ok {
 			return fmt.Errorf("delay step '%s' missing 'duration' in config", step.ID)
