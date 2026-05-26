@@ -17,6 +17,7 @@ import (
 	appMiddleware "github.com/AnsiMauludina/flowforge/internal/middleware"
 	"github.com/AnsiMauludina/flowforge/internal/model"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
+	appWS "github.com/AnsiMauludina/flowforge/internal/websocket"
 )
 
 func main() {
@@ -61,7 +62,14 @@ func main() {
 	// Init repositories & handler
 	workflowRepo := repository.NewWorkflowRepository(db)
 	userRepo := repository.NewUserRepository(db)
-	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret)
+
+	// Init WebSocket hub
+	hub := appWS.NewHub()
+	go hub.Run()
+
+	// Pass hub ke handler
+
+	h := handler.NewHandler(workflowRepo, userRepo, cfg.JWTSecret, hub)
 
 	// JWT middleware
 	jwtMW := appMiddleware.NewJWTMiddleware(
@@ -107,6 +115,9 @@ func main() {
 
 		// Metrics
 		protected.GET("/metrics", h.GetHealthMetrics)
+
+		// WebSocket
+		protected.GET("/ws", h.ServeWS)
 	}
 
 	// Server
@@ -128,11 +139,13 @@ func main() {
 	<-quit
 
 	fmt.Println("⏳ Shutting down...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		fmt.Printf("❌ Shutdown error: %v\n", err)
 	}
+
 	fmt.Println("✅ Server stopped")
 }

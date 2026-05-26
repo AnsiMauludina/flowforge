@@ -22,12 +22,14 @@ func NewHandler(
 	workflowRepo *repository.WorkflowRepository,
 	userRepo *repository.UserRepository,
 	jwtSecret string,
+	hub WebSocketHub,
 ) *Handler {
 	return &Handler{
 		workflowRepo: workflowRepo,
 		userRepo:     userRepo,
 		jwtSecret:    jwtSecret,
 		validate:     validator.New(),
+		hub:          hub,
 	}
 }
 
