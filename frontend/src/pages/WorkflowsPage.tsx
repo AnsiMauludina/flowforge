@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Play, Trash2, GitBranch, Search, X } from 'lucide-react'
+import { Plus, Play, Trash2, GitBranch, Search, X, CheckCircle, AlertCircle } from 'lucide-react'
 import Layout from '@/components/layout/Layout'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -21,10 +21,19 @@ const STATUS_OPTIONS: { value: StatusOption; label: string }[] = [
   { value: 'false', label: 'Inactive' },
 ]
 
+type Toast = { id: number; type: 'success' | 'error'; message: string }
+
 export default function WorkflowsPage() {
   const [page, setPage] = useState(1)
   const [nameInput, setNameInput] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusOption>('')
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  const addToast = useCallback((type: Toast['type'], message: string) => {
+    const id = Date.now()
+    setToasts((prev) => [...prev, { id, type, message }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500)
+  }, [])
 
   // Debounce the name so we don't fire an API call on every keystroke
   const debouncedName = useDebounce(nameInput, 350)
@@ -35,8 +44,24 @@ export default function WorkflowsPage() {
   }
 
   const { data, isLoading } = useWorkflows(page, 20, filter)
+
   const deleteMutation = useDeleteWorkflow()
   const triggerMutation = useTriggerWorkflow()
+
+  const handleDelete = useCallback((id: string, name: string) => {
+    if (!confirm(`Delete "${name}"?`)) return
+    deleteMutation.mutate(id, {
+      onSuccess: () => addToast('success', `"${name}" deleted`),
+      onError: () => addToast('error', `Failed to delete "${name}"`),
+    })
+  }, [deleteMutation, addToast])
+
+  const handleTrigger = useCallback((id: string, name: string) => {
+    triggerMutation.mutate(id, {
+      onSuccess: () => addToast('success', `"${name}" triggered`),
+      onError: () => addToast('error', `Failed to trigger "${name}"`),
+    })
+  }, [triggerMutation, addToast])
 
   // Reset to page 1 whenever filter changes
   const handleNameChange = useCallback((v: string) => {
@@ -57,6 +82,27 @@ export default function WorkflowsPage() {
 
   return (
     <Layout title="Workflows">
+      {/* Toast notifications */}
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium
+              transition-all animate-in slide-in-from-bottom-2 duration-200
+              ${t.type === 'success'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-red-500 text-white'
+              }`}
+          >
+            {t.type === 'success'
+              ? <CheckCircle className="w-4 h-4 shrink-0" />
+              : <AlertCircle className="w-4 h-4 shrink-0" />
+            }
+            {t.message}
+          </div>
+        ))}
+      </div>
+
       <div className="space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -216,8 +262,8 @@ export default function WorkflowsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          loading={triggerMutation.isPending}
-                          onClick={() => triggerMutation.mutate(wf.id)}
+                          loading={triggerMutation.isPending && triggerMutation.variables === wf.id}
+                          onClick={() => handleTrigger(wf.id, wf.name)}
                           title="Trigger run"
                           className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                         >
@@ -226,12 +272,8 @@ export default function WorkflowsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          loading={deleteMutation.isPending}
-                          onClick={() => {
-                            if (confirm('Delete this workflow?')) {
-                              deleteMutation.mutate(wf.id)
-                            }
-                          }}
+                          loading={deleteMutation.isPending && deleteMutation.variables === wf.id}
+                          onClick={() => handleDelete(wf.id, wf.name)}
                           title="Delete workflow"
                           className="text-red-400 hover:bg-red-50 hover:text-red-600"
                         >

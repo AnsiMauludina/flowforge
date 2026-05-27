@@ -27,16 +27,31 @@ export default function WorkflowDetailPage() {
   const { stepRuns } = useWorkflowStore()
 
   const handleTrigger = async () => {
-    const result = await triggerMutation.mutateAsync(id!)
-    if (result.run_id) {
-      setSelectedRun({
-        id: result.run_id,
-        workflowId: id!,
-        tenantId: '',
-        status: 'pending',
-        triggerType: 'manual',
-        createdAt: new Date().toISOString(),
-      })
+    // Show an optimistic "pending" run immediately so RunHistory + LiveMonitor
+    // respond before the server confirms — replaced with real run on success.
+    const optimisticRun: WorkflowRun = {
+      id: `optimistic-${Date.now()}`,
+      workflowId: id!,
+      tenantId: '',
+      status: 'pending',
+      triggerType: 'manual',
+      createdAt: new Date().toISOString(),
+    }
+    setSelectedRun(optimisticRun)
+
+    try {
+      const result = await triggerMutation.mutateAsync(id!)
+      // Replace placeholder with the real run_id from the server
+      if (result.run_id) {
+        setSelectedRun((prev) =>
+          prev?.id === optimisticRun.id
+            ? { ...prev, id: result.run_id, status: 'running' }
+            : prev
+        )
+      }
+    } catch {
+      // Roll back optimistic selection on failure
+      setSelectedRun(null)
     }
   }
 

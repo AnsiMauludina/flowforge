@@ -56,8 +56,12 @@ export function useCreateWorkflow() {
   })
 }
 
+// ─── useUpdateWorkflow ────────────────────────────────────────────────────────
+// Optimistic: immediately reflects the new name/description/cron in the detail
+// view while the PUT is in-flight. Rolls back on error.
 export function useUpdateWorkflow(id: string) {
   const qc = useQueryClient()
+
   return useMutation({
     mutationFn: async (payload: Partial<WorkflowDefinition>) => {
       const { data } = await api.put<{ data: WorkflowDefinition }>(
@@ -65,33 +69,158 @@ export function useUpdateWorkflow(id: string) {
       )
       return data.data
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workflows'] })
+
+    onMutate: async (payload) => {
+      // Cancel in-flight refetches so they don't clobber our optimistic data
+      await qc.cancelQueries({ queryKey: ['workflow', id] })
+
+      const snapshot = qc.getQueryData<WorkflowDefinition>(['workflow', id])
+
+      // Apply optimistic update to the detail cache
+      qc.setQueryData<WorkflowDefinition>(['workflow', id], (old) =>
+        old ? { ...old, ...payload } : old
+      )
+
+      return { snapshot }
+    },
+
+    onError: (_err, _payload, ctx) => {
+      // Restore snapshot so UI snaps back
+      if (ctx?.snapshot) {
+        qc.setQueryData(['workflow', id], ctx.snapshot)
+      }
+    },
+
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['workflow', id] })
+      qc.invalidateQueries({ queryKey: ['workflows'] })
     },
   })
 }
 
+// ─── useDeleteWorkflow ────────────────────────────────────────────────────────
+// Optimistic: instantly removes the row from every cached page of the workflow
+// list. Shows a rollback (the row reappears) if the request fails.
 export function useDeleteWorkflow() {
   const qc = useQueryClient()
+
   return useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/workflows/${id}`)
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ['workflows'] })
+
+      // Snapshot ALL pages that are currently cached
+      const snapshots = qc.getQueriesData<PaginatedResponse<WorkflowDefinition>>(
+        { queryKey: ['workflows'] }
+      )
+
+      // Remove the workflow from every cached page and decrement total
+      qc.setQueriesData<PaginatedResponse<WorkflowDefinition>>(
+        { queryKey: ['workflows'] },
+        (old) => {
+          if (!old) return old
+          const filtered = old.data.filter((wf) => wf.id !== id)
+          return {
+            ...old,
+            data: filtered,
+            total: Math.max(0, old.total - 1),
+          }
+        }
+      )
+
+      return { snapshots }
+    },
+
+    onError: (_err, _id, ctx) => {
+      // Restore every page to its previous state
+      ctx?.snapshots.forEach(([queryKey, data]) => {
+        qc.setQueryData(queryKey, data)
+      })
+    },
+
+    onSettled: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
   })
 }
 
+// ─── useTriggerWorkflow ───────────────────────────────────────────────────────
+// Optimistic: immediately prepends a "pending" run to the run-history list so
+// the user sees instant feedback. Replaced with the real run once the server
+// responds; rolled back if the request fails.
 export function useTriggerWorkflow() {
   const qc = useQueryClient()
+
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (workflowId: string) => {
       const { data } = await api.post<{ data: { run_id: string } }>(
-        `/workflows/${id}/trigger`
+        `/workflows/${workflowId}/trigger`
       )
       return data.data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['runs'] }),
+
+    onMutate: async (workflowId) => {
+      await qc.cancelQueries({ queryKey: ['runs', workflowId] })
+
+      // Snapshot current runs
+      const snapshots = qc.getQueriesData<PaginatedResponse<WorkflowRun>>(
+        { queryKey: ['runs', workflowId] }
+      )
+
+      // Build a temporary run entry with a client-side id
+      const optimisticRun: WorkflowRun = {
+        id: `optimistic-${Date.now()}`,
+        workflowId,
+        tenantId: '',
+        status: 'pending',
+        triggerType: 'manual',
+        createdAt: new Date().toISOString(),
+      }
+
+      // Prepend it to every cached page-1 result
+      qc.setQueriesData<PaginatedResponse<WorkflowRun>>(
+        { queryKey: ['runs', workflowId] },
+        (old) => {
+          if (!old) return old
+          return {
+            ...old,
+            data: [optimisticRun, ...old.data],
+            total: old.total + 1,
+          }
+        }
+      )
+
+      return { snapshots, optimisticRun }
+    },
+
+    onSuccess: (result, workflowId, ctx) => {
+      // Swap the placeholder id with the real run_id from the server
+      qc.setQueriesData<PaginatedResponse<WorkflowRun>>(
+        { queryKey: ['runs', workflowId] },
+        (old) => {
+          if (!old || !ctx) return old
+          return {
+            ...old,
+            data: old.data.map((r) =>
+              r.id === ctx.optimisticRun.id
+                ? { ...r, id: result.run_id, status: 'running' as const }
+                : r
+            ),
+          }
+        }
+      )
+    },
+
+    onError: (_err, _workflowId, ctx) => {
+      ctx?.snapshots.forEach(([queryKey, data]) => {
+        qc.setQueryData(queryKey, data)
+      })
+    },
+
+    onSettled: (_data, _err, workflowId) => {
+      qc.invalidateQueries({ queryKey: ['runs', workflowId] })
+    },
   })
 }
 
