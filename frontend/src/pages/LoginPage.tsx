@@ -60,7 +60,7 @@ export default function LoginPage() {
           {error && (
             <div className="mb-5 p-3.5 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm flex items-start gap-2">
               <span className="mt-0.5 shrink-0">⚠</span>
-              <span>{(error as any)?.response?.data?.error || 'Something went wrong'}</span>
+              <span>{(error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Something went wrong'}</span>
             </div>
           )}
 

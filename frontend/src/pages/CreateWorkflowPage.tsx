@@ -728,12 +728,13 @@ export default function CreateWorkflowPage() {
       const workflow = await createMutation.mutateAsync({
         name: wfName,
         description,
-        dag: dag as any,
+        dag: dag as Record<string, unknown>,
         ...(triggerType === 'cron' && cronExpression ? { cronExpression } : {}),
       })
       navigate(`/workflows/${workflow.id}`)
-    } catch (err: any) {
-      setGlobalError(err?.response?.data?.error || 'Failed to create workflow')
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } } }
+      setGlobalError(e?.response?.data?.error || 'Failed to create workflow')
     }
   }
 

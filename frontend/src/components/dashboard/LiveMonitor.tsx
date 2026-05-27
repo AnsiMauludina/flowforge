@@ -192,12 +192,9 @@ const CARD_BG: Record<string, string> = {
 }
 
 function StepCard({ step }: { step: StepRun }) {
-  const [expanded, setExpanded] = useState(step.status === 'failed')
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null)
+  const expanded = manualExpanded ?? (step.status === 'failed')
   const hasDetails = !!(step.error || (step.output && Object.keys(step.output).length > 0))
-
-  useEffect(() => {
-    if (step.status === 'failed') setExpanded(true)
-  }, [step.status])
 
   const dur = stepDuration(step)
 
@@ -221,7 +218,7 @@ function StepCard({ step }: { step: StepRun }) {
   return (
     <div
       className={`rounded-xl border transition-all duration-200 ${CARD_BG[step.status] ?? CARD_BG.pending} ${hasDetails ? 'cursor-pointer' : ''}`}
-      onClick={() => hasDetails && setExpanded(o => !o)}
+      onClick={() => hasDetails && setManualExpanded(!expanded)}
     >
       {/* Header row */}
       <div className="flex items-center gap-2.5 p-3">

@@ -35,8 +35,6 @@ export function useWebSocket(runID?: string) {
         connectedRef.current = false
       }
     }
-    // Re-run only when the actual target changes, not on every render
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, runID, shouldConnect])
 
   return { isConnected: wsService.isConnected() }
