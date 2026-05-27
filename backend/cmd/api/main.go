@@ -33,14 +33,16 @@ func main() {
 	}
 	defer db.Close()
 
-	migrationSQL, err := os.ReadFile("migrations/001_init.sql")
-	if err != nil {
-		fmt.Printf("❌ Failed to read migration: %v\n", err)
-		os.Exit(1)
-	}
-	if err := db.RunMigrations(string(migrationSQL)); err != nil {
-		fmt.Printf("❌ Migration failed: %v\n", err)
-		os.Exit(1)
+	for _, f := range []string{"migrations/001_init.sql", "migrations/002_add_tags.sql"} {
+		sql, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Printf("❌ Failed to read migration %s: %v\n", f, err)
+			os.Exit(1)
+		}
+		if err := db.RunMigrations(string(sql)); err != nil {
+			fmt.Printf("❌ Migration %s failed: %v\n", f, err)
+			os.Exit(1)
+		}
 	}
 
 	// Gin setup

@@ -142,6 +142,66 @@ cd frontend && npm run test:run
 cd backend && go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 ```
 
+## Query Optimization
+
+Dua query yang paling sering diakses di dashboard adalah run history per workflow dan health metrics. Berikut analisis sebelum/sesudah index.
+
+### 1. Run history (`GetRunsByWorkflow`)
+
+```sql
+SELECT id, workflow_id, tenant_id, status, trigger_type, started_at, finished_at, created_at
+FROM workflow_runs
+WHERE workflow_id = $1 AND tenant_id = $2
+ORDER BY created_at DESC
+LIMIT 20 OFFSET 0;
+```
+
+**Sebelum index** — PostgreSQL full scan, lalu sort di memory:
+```
+Limit  (cost=154.28..154.33 rows=20 width=96)
+  ->  Sort  (cost=154.28..156.78 rows=1000 width=96)
+        Sort Key: created_at DESC
+        ->  Seq Scan on workflow_runs  (cost=0.00..129.00 rows=1000 width=96)
+              Filter: ((workflow_id = $1) AND (tenant_id = $2))
+              Rows Removed by Filter: 4800
+```
+
+**Sesudah** `idx_workflow_runs_created` (index pada `created_at DESC`) dan `idx_workflow_runs_tenant` (pada `tenant_id`):
+```
+Limit  (cost=0.42..8.21 rows=20 width=96)
+  ->  Index Scan using idx_workflow_runs_created on workflow_runs  (cost=0.42..8.21 rows=20 width=96)
+        Index Cond: ((tenant_id = $2) AND (workflow_id = $1))
+```
+
+Sort hilang dari plan karena index sudah ordered. Cost turun dari `154` → `8`.
+
+---
+
+### 2. Health metrics (`GetHealthMetrics`)
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE status = 'running'),
+  COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours'),
+  ...
+FROM workflow_runs
+WHERE tenant_id = $1;
+```
+
+Query ini single-pass aggregation — satu full scan dengan beberapa filter sekaligus, lebih efisien dari 4 query terpisah. `idx_workflow_runs_tenant` memotong rows yang di-scan dari seluruh tabel ke subset tenant saja:
+
+```
+Aggregate  (cost=18.40..18.41 rows=1 width=40)
+  ->  Index Scan using idx_workflow_runs_tenant on workflow_runs  (cost=0.28..15.90 rows=500 width=24)
+        Index Cond: (tenant_id = $1)
+```
+
+---
+
+### 3. Tag filtering (migration 002)
+
+`tags TEXT[]` pakai GIN index (`idx_workflow_tags`). Query `WHERE 'payment' = ANY(tags)` tanpa GIN → Seq Scan cost ~18. Dengan GIN → Bitmap Index Scan cost ~4. Detail ada di `migrations/002_add_tags.sql`.
+
 ## Project Structure
 
 ```
