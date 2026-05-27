@@ -102,17 +102,22 @@ func main() {
 		appMiddleware.JWTConfig{Secret: cfg.JWTSecret},
 	)
 
-	// Health check
+	// Rate limiter: cfg.RateLimit requests per minute per IP
+	rateLimiter := appMiddleware.NewRateLimiter(cfg.RateLimit, time.Minute)
+	rateLimitMW := appMiddleware.RateLimit(rateLimiter)
+
+	// Health check (not rate-limited — used by load balancers / probes)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status":           "ok",
-			"version":          "1.0.0",
-			"scheduled_jobs":   sched.Count(),
+			"status":         "ok",
+			"version":        "1.0.0",
+			"scheduled_jobs": sched.Count(),
 		})
 	})
 
 	// API v1
 	v1 := r.Group("/api/v1")
+	v1.Use(rateLimitMW) // apply to all /api/v1/* routes
 
 	// Public routes
 	auth := v1.Group("/auth")
