@@ -125,6 +125,32 @@ All protected routes require `Authorization: Bearer <token>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST   | `/api/v1/ai/generate` | `{ "description": "..." }` → DAG JSON |
+| POST   | `/api/v1/runs/:run_id/analyze` | AI diagnosis + fix suggestion for failed runs |
+| POST   | `/api/v1/ai/schedule` | Suggest optimal cron windows based on run history |
+
+## AI Implementation Notes
+
+Semua fitur AI di-handle di [`backend/internal/handler/ai.go`](backend/internal/handler/ai.go). Model yang dipakai adalah `claude-haiku-4-5-20251001` — dipilih karena response-nya cepat dan biayanya rendah untuk use case structured JSON generation.
+
+### Prompt Engineering
+
+Tiga endpoint pakai system prompt yang berbeda:
+
+**DAG generation** — prompt minta Claude return *only* valid JSON, tanpa markdown, tanpa penjelasan. Sertakan schema lengkap step types + contoh config supaya output langsung bisa di-parse.
+
+**Failure analysis** — context yang dikirim ke Claude berisi nama workflow, DAG definition, status run, dan semua step results. Dari situ Claude bisa bedain apakah gagalnya di step tertentu (HTTP timeout, script error) atau di level DAG (dependency loop, timeout global).
+
+**Schedule suggestion** — kalau ada historical data, kita kirim hourly_patterns dari 30 hari terakhir (jam, total runs, success rate, avg duration). Kalau belum ada data, fallback ke best-practice suggestions berdasarkan deskripsi workflow.
+
+### Menangani Output yang Tidak Konsisten
+
+Claude kadang tetap wrap JSON dengan markdown code fences meskipun sudah dilarang di prompt. Ada helper `stripCodeFences()` yang stripping itu sebelum `json.Unmarshal`. Kalau unmarshal tetap gagal, error dikembalikan ke client dengan raw response-nya untuk debugging.
+
+Token limit: DAG generation dibatasi 1024 tokens (cukup untuk 5-step DAG), failure analysis dan schedule suggestion 512 tokens.
+
+### Degradasi Tanpa API Key
+
+Kalau `ANTHROPIC_API_KEY` tidak di-set, semua endpoint AI return `503 Service Unavailable` dengan pesan yang jelas. Fitur lain tidak terpengaruh.
 
 ### WebSocket
 `ws://host/api/v1/ws?token=<jwt>&run_id=<run_id>` — streams `StepResult` events in real-time.
