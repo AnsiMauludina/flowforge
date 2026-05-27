@@ -3,7 +3,6 @@ import HealthPanel from '@/components/dashboard/HealthPanel'
 import { useWorkflows } from '@/hooks/useWorkflows'
 import { Link } from 'react-router-dom'
 import Badge from '@/components/ui/Badge'
-import type { RunStatus } from '@/types'
 
 export default function DashboardPage() {
   const { data } = useWorkflows(1, 5)
@@ -87,7 +86,7 @@ export default function DashboardPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <Badge
-                          status={wf.isActive ? 'success' : ('cancelled' as RunStatus)}
+                          status={wf.isActive ? 'success' : 'cancelled'}
                           label={wf.isActive ? 'Active' : 'Inactive'}
                         />
                       </td>

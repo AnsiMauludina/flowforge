@@ -14,8 +14,10 @@ interface RunHistoryProps {
 }
 
 function getDuration(run: WorkflowRun) {
-  if (!run.startedAt || !run.finishedAt) return '—'
-  const ms = dayjs(run.finishedAt).diff(dayjs(run.startedAt))
+  if (!run.startedAt) return '—'
+  const end = run.finishedAt ? dayjs(run.finishedAt) : (run.status === 'running' ? dayjs() : null)
+  if (!end) return '—'
+  const ms = end.diff(dayjs(run.startedAt))
   const d = dayjs.duration(ms)
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${d.seconds()}s`
