@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Play, ArrowLeft, Clock, GitBranch, Webhook, CalendarClock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import Layout from '@/components/layout/Layout'
@@ -36,7 +36,15 @@ export default function WorkflowDetailPage() {
   const { data: workflow, isLoading } = useWorkflow(id!)
   const { data: runsData } = useWorkflowRuns(id!, runsPage)
   const triggerMutation = useTriggerWorkflow()
-  const { stepRuns } = useWorkflowStore()
+  const { stepRuns, activeRun } = useWorkflowStore()
+
+  // Sync the header status badge from the store — gets updated via WS run_complete events
+  useEffect(() => {
+    if (!activeRun || !selectedRun) return
+    if (activeRun.id === selectedRun.id && activeRun.status !== selectedRun.status) {
+      setSelectedRun(prev => prev ? { ...prev, status: activeRun.status } : prev)
+    }
+  }, [activeRun?.id, activeRun?.status])
 
   const handleTrigger = async () => {
     const optimisticRun: WorkflowRun = {

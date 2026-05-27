@@ -15,13 +15,14 @@ import {
   Globe,
   GitBranch,
   Timer,
+  Sparkles,
 } from 'lucide-react'
 import { useWorkflowStore } from '@/store/workflowStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
-import { useRunSteps } from '@/hooks/useWorkflows'
+import { useRunSteps, useAnalyzeRun } from '@/hooks/useWorkflows'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
-import type { WorkflowRun, StepRun, StepStatus, StepType } from '@/types'
+import type { WorkflowRun, StepRun, StepStatus, StepType, FailureAnalysis } from '@/types'
 
 dayjs.extend(duration)
 
@@ -91,6 +92,91 @@ function JsonBlock({ value, label }: { value: Record<string, unknown>; label: st
                         overflow-x-auto max-h-48 leading-relaxed">
           {json}
         </pre>
+      )}
+    </div>
+  )
+}
+
+// ─── AI Failure Analysis panel ───────────────────────────────────────────────
+function AIAnalysisPanel({
+  runId,
+  isOptimistic,
+}: {
+  runId: string
+  isOptimistic: boolean
+}) {
+  const analyzeMutation = useAnalyzeRun()
+  const [result, setResult] = useState<FailureAnalysis | null>(null)
+  const [open, setOpen] = useState(false)
+
+  const handleAnalyze = async () => {
+    setOpen(true)
+    try {
+      const data = await analyzeMutation.mutateAsync(runId)
+      setResult(data)
+    } catch {
+      // error shown via mutation state
+    }
+  }
+
+  if (isOptimistic) return null
+
+  return (
+    <div className="mt-2">
+      {!open ? (
+        <button
+          onClick={handleAnalyze}
+          className="flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700
+                     bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors w-full justify-center"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Analyze failure with AI
+        </button>
+      ) : (
+        <div className="rounded-xl border border-violet-200 bg-violet-50/60 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 bg-violet-100/60 border-b border-violet-200">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
+              <Sparkles className="w-3.5 h-3.5" />
+              AI Diagnosis
+            </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-[10px] text-violet-400 hover:text-violet-600 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="p-3 space-y-3">
+            {analyzeMutation.isPending && (
+              <div className="flex items-center gap-2 py-2">
+                <Loader2 className="w-3.5 h-3.5 text-violet-500 animate-spin" />
+                <p className="text-xs text-violet-500">Analyzing failure…</p>
+              </div>
+            )}
+
+            {analyzeMutation.isError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
+                {analyzeMutation.error instanceof Error
+                  ? analyzeMutation.error.message
+                  : 'Analysis failed'}
+              </p>
+            )}
+
+            {result && (
+              <>
+                <div>
+                  <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide mb-1">Diagnosis</p>
+                  <p className="text-xs text-gray-700 leading-relaxed">{result.diagnosis}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide mb-1">Suggested Fix</p>
+                  <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">{result.suggestedFix}</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -313,6 +399,11 @@ export default function LiveMonitor({ run, totalSteps }: LiveMonitorProps) {
         <div className="space-y-1.5">
           {steps.map(step => <StepCard key={step.stepId} step={step} />)}
         </div>
+      )}
+
+      {/* AI failure analysis — shown only when the run has definitively failed */}
+      {(run.status === 'failed' || run.status === 'timeout') && !isOptimistic && (
+        <AIAnalysisPanel runId={run.id} isOptimistic={isOptimistic} />
       )}
     </div>
   )

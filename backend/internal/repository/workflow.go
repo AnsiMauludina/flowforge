@@ -553,3 +553,73 @@ func (r *WorkflowRepository) ListAllScheduled(ctx context.Context) ([]model.Work
 	}
 	return workflows, nil
 }
+
+// HourlyPattern holds run stats grouped by UTC hour-of-day for schedule optimisation.
+type HourlyPattern struct {
+	Hour    int     `json:"hour"`
+	Total   int     `json:"total"`
+	Success int     `json:"success"`
+	Failed  int     `json:"failed"`
+	AvgDurS float64 `json:"avg_dur_s"`
+}
+
+// GetRunByID fetches a single workflow run with tenant isolation.
+func (r *WorkflowRepository) GetRunByID(
+	ctx context.Context,
+	runID, tenantID uuid.UUID,
+) (*model.WorkflowRun, error) {
+	query := `
+		SELECT id, workflow_id, tenant_id, status, trigger_type,
+		       started_at, finished_at, created_at
+		FROM workflow_runs
+		WHERE id = $1 AND tenant_id = $2
+	`
+	var run model.WorkflowRun
+	err := r.db.QueryRowContext(ctx, query, runID, tenantID).Scan(
+		&run.ID, &run.WorkflowID, &run.TenantID, &run.Status, &run.TriggerType,
+		&run.StartedAt, &run.FinishedAt, &run.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// GetHourlyRunPatterns returns last-30-day run stats per UTC hour for a workflow.
+// Used by the smart scheduling AI feature to find low-risk execution windows.
+func (r *WorkflowRepository) GetHourlyRunPatterns(
+	ctx context.Context,
+	workflowID, tenantID uuid.UUID,
+) ([]HourlyPattern, error) {
+	query := `
+		SELECT
+			EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour,
+			COUNT(*) AS total,
+			COUNT(*) FILTER (WHERE status = 'success') AS success,
+			COUNT(*) FILTER (WHERE status IN ('failed', 'timeout')) AS failed,
+			COALESCE(AVG(
+				EXTRACT(EPOCH FROM (finished_at - started_at))
+			) FILTER (WHERE finished_at IS NOT NULL AND started_at IS NOT NULL), 0) AS avg_dur_s
+		FROM workflow_runs
+		WHERE workflow_id = $1
+		  AND tenant_id = $2
+		  AND created_at > NOW() - INTERVAL '30 days'
+		GROUP BY hour
+		ORDER BY hour
+	`
+	rows, err := r.db.QueryContext(ctx, query, workflowID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var patterns []HourlyPattern
+	for rows.Next() {
+		var p HourlyPattern
+		if err := rows.Scan(&p.Hour, &p.Total, &p.Success, &p.Failed, &p.AvgDurS); err != nil {
+			return nil, err
+		}
+		patterns = append(patterns, p)
+	}
+	return patterns, rows.Err()
+}

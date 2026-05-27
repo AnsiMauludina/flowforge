@@ -5,6 +5,7 @@ import Layout from '@/components/layout/Layout'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import {
   useWorkflows,
   useDeleteWorkflow,
@@ -28,6 +29,7 @@ export default function WorkflowsPage() {
   const [nameInput, setNameInput] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusOption>('')
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
   const addToast = useCallback((type: Toast['type'], message: string) => {
     const id = Date.now()
@@ -48,13 +50,20 @@ export default function WorkflowsPage() {
   const deleteMutation = useDeleteWorkflow()
   const triggerMutation = useTriggerWorkflow()
 
-  const handleDelete = useCallback((id: string, name: string) => {
-    if (!confirm(`Delete "${name}"?`)) return
+  const handleDeleteConfirm = useCallback(() => {
+    if (!deleteTarget) return
+    const { id, name } = deleteTarget
     deleteMutation.mutate(id, {
-      onSuccess: () => addToast('success', `"${name}" deleted`),
-      onError: () => addToast('error', `Failed to delete "${name}"`),
+      onSuccess: () => {
+        addToast('success', `"${name}" deleted`)
+        setDeleteTarget(null)
+      },
+      onError: () => {
+        addToast('error', `Failed to delete "${name}"`)
+        setDeleteTarget(null)
+      },
     })
-  }, [deleteMutation, addToast])
+  }, [deleteTarget, deleteMutation, addToast])
 
   const handleTrigger = useCallback((id: string, name: string) => {
     triggerMutation.mutate(id, {
@@ -273,7 +282,7 @@ export default function WorkflowsPage() {
                           size="sm"
                           variant="ghost"
                           loading={deleteMutation.isPending && deleteMutation.variables === wf.id}
-                          onClick={() => handleDelete(wf.id, wf.name)}
+                          onClick={() => setDeleteTarget({ id: wf.id, name: wf.name })}
                           title="Delete workflow"
                           className="text-red-400 hover:bg-red-50 hover:text-red-600"
                         >
@@ -315,6 +324,16 @@ export default function WorkflowsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`Delete "${deleteTarget?.name}"?`}
+        description="This will permanently remove the workflow and all its run history. This action cannot be undone."
+        confirmLabel="Delete"
+        loading={deleteMutation.isPending}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Layout>
   )
 }

@@ -354,6 +354,11 @@ func (h *Handler) executeWorkflow(
 
 	dagDef, err := parseDAGFromMap(workflow.DAG)
 	if err != nil {
+		now := time.Now()
+		h.workflowRepo.UpdateRunStatus(ctx, runID, model.RunStatusFailed, &now, &now)
+		if h.hub != nil {
+			h.hub.BroadcastRunComplete(runID.String(), string(model.RunStatusFailed))
+		}
 		return
 	}
 
@@ -361,6 +366,10 @@ func (h *Handler) executeWorkflow(
 	h.workflowRepo.UpdateRunStatus(ctx, runID,
 		model.RunStatusRunning, &now, nil,
 	)
+
+	if h.hub != nil {
+		h.hub.BroadcastRunStatus(workflow.TenantID.String(), runID.String(), string(model.RunStatusRunning))
+	}
 
 	exec := engine.NewExecutor(engine.ExecutorConfig{
 		DefaultTimeout:    30 * time.Minute,
@@ -394,6 +403,10 @@ func (h *Handler) executeWorkflow(
 	h.workflowRepo.UpdateRunStatus(ctx, runID,
 		model.RunStatus(result.Status), nil, &finishedAt,
 	)
+
+	if h.hub != nil {
+		h.hub.BroadcastRunComplete(runID.String(), string(result.Status))
+	}
 }
 
 func parseDAGFromMap(m map[string]interface{}) (*engine.DAGDefinition, error) {

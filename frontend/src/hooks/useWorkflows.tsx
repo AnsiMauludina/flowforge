@@ -5,6 +5,8 @@ import type {
   WorkflowRun,
   HealthMetrics,
   PaginatedResponse,
+  FailureAnalysis,
+  ScheduleSuggestion,
 } from '@/types'
 
 export interface WorkflowFilter {
@@ -282,5 +284,28 @@ export function useHealthMetrics() {
       return data.data
     },
     refetchInterval: 10000,
+  })
+}
+
+// Sends a failed run to Claude for root-cause diagnosis + suggested fix.
+export function useAnalyzeRun() {
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const { data } = await api.post<{ data: FailureAnalysis }>(`/runs/${runId}/analyze`)
+      return data.data
+    },
+  })
+}
+
+// Asks Claude to suggest optimal cron schedules based on historical run patterns.
+export function useScheduleSuggestions() {
+  return useMutation({
+    mutationFn: async (params: { workflowId?: string; description?: string }) => {
+      const { data } = await api.post<{ data: { suggestions: ScheduleSuggestion[] } }>(
+        '/ai/schedule',
+        params
+      )
+      return data.data.suggestions
+    },
   })
 }

@@ -105,3 +105,14 @@ export interface AuthResponse {
   token: string
   user: User
 }
+
+export interface FailureAnalysis {
+  diagnosis: string
+  suggestedFix: string
+}
+
+export interface ScheduleSuggestion {
+  cron: string
+  label: string
+  reason: string
+}

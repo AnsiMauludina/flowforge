@@ -21,6 +21,8 @@ type Handler struct {
 
 type WebSocketHub interface {
 	BroadcastToRun(runID string, data interface{})
+	BroadcastRunStatus(tenantID string, runID string, status string)
+	BroadcastRunComplete(runID string, status string)
 }
 
 func NewHandler(

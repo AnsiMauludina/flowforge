@@ -53,9 +53,10 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(requestid.New())
 
-	// CORS
+	// CORS — allowed origins come from CORS_ORIGINS env var (comma-separated).
+	// Defaults: localhost:3000, localhost:3001, localhost:5173 (Vite default).
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     cfg.CORSOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -157,8 +158,10 @@ func main() {
 		protected.DELETE("/webhooks/:webhook_id", h.DeleteWebhook,
 			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
 
-		// AI-powered workflow generation
+		// AI features
 		protected.POST("/ai/generate", h.GenerateWorkflowWithAI)
+		protected.POST("/ai/schedule", h.GetScheduleSuggestions)
+		protected.POST("/runs/:run_id/analyze", h.AnalyzeRunFailure)
 
 		// Metrics
 		protected.GET("/metrics", h.GetHealthMetrics)
