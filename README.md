@@ -125,6 +125,32 @@ All protected routes require `Authorization: Bearer <token>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST   | `/api/v1/ai/generate` | `{ "description": "..." }` → DAG JSON |
+| POST   | `/api/v1/runs/:run_id/analyze` | AI diagnosis + fix suggestion for failed runs |
+| POST   | `/api/v1/ai/schedule` | Suggest optimal cron windows based on run history |
+
+## AI Implementation Notes
+
+Semua fitur AI di-handle di [`backend/internal/handler/ai.go`](backend/internal/handler/ai.go). Model yang dipakai adalah `claude-haiku-4-5-20251001` — dipilih karena response-nya cepat dan biayanya rendah untuk use case structured JSON generation.
+
+### Prompt Engineering
+
+Tiga endpoint pakai system prompt yang berbeda:
+
+**DAG generation** — prompt minta Claude return *only* valid JSON, tanpa markdown, tanpa penjelasan. Sertakan schema lengkap step types + contoh config supaya output langsung bisa di-parse.
+
+**Failure analysis** — context yang dikirim ke Claude berisi nama workflow, DAG definition, status run, dan semua step results. Dari situ Claude bisa bedain apakah gagalnya di step tertentu (HTTP timeout, script error) atau di level DAG (dependency loop, timeout global).
+
+**Schedule suggestion** — kalau ada historical data, kita kirim hourly_patterns dari 30 hari terakhir (jam, total runs, success rate, avg duration). Kalau belum ada data, fallback ke best-practice suggestions berdasarkan deskripsi workflow.
+
+### Menangani Output yang Tidak Konsisten
+
+Claude kadang tetap wrap JSON dengan markdown code fences meskipun sudah dilarang di prompt. Ada helper `stripCodeFences()` yang stripping itu sebelum `json.Unmarshal`. Kalau unmarshal tetap gagal, error dikembalikan ke client dengan raw response-nya untuk debugging.
+
+Token limit: DAG generation dibatasi 1024 tokens (cukup untuk 5-step DAG), failure analysis dan schedule suggestion 512 tokens.
+
+### Degradasi Tanpa API Key
+
+Kalau `ANTHROPIC_API_KEY` tidak di-set, semua endpoint AI return `503 Service Unavailable` dengan pesan yang jelas. Fitur lain tidak terpengaruh.
 
 ### WebSocket
 `ws://host/api/v1/ws?token=<jwt>&run_id=<run_id>` — streams `StepResult` events in real-time.
@@ -141,6 +167,66 @@ cd frontend && npm run test:run
 # Coverage report
 cd backend && go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 ```
+
+## Query Optimization
+
+Dua query yang paling sering diakses di dashboard adalah run history per workflow dan health metrics. Berikut analisis sebelum/sesudah index.
+
+### 1. Run history (`GetRunsByWorkflow`)
+
+```sql
+SELECT id, workflow_id, tenant_id, status, trigger_type, started_at, finished_at, created_at
+FROM workflow_runs
+WHERE workflow_id = $1 AND tenant_id = $2
+ORDER BY created_at DESC
+LIMIT 20 OFFSET 0;
+```
+
+**Sebelum index** — PostgreSQL full scan, lalu sort di memory:
+```
+Limit  (cost=154.28..154.33 rows=20 width=96)
+  ->  Sort  (cost=154.28..156.78 rows=1000 width=96)
+        Sort Key: created_at DESC
+        ->  Seq Scan on workflow_runs  (cost=0.00..129.00 rows=1000 width=96)
+              Filter: ((workflow_id = $1) AND (tenant_id = $2))
+              Rows Removed by Filter: 4800
+```
+
+**Sesudah** `idx_workflow_runs_created` (index pada `created_at DESC`) dan `idx_workflow_runs_tenant` (pada `tenant_id`):
+```
+Limit  (cost=0.42..8.21 rows=20 width=96)
+  ->  Index Scan using idx_workflow_runs_created on workflow_runs  (cost=0.42..8.21 rows=20 width=96)
+        Index Cond: ((tenant_id = $2) AND (workflow_id = $1))
+```
+
+Sort hilang dari plan karena index sudah ordered. Cost turun dari `154` → `8`.
+
+---
+
+### 2. Health metrics (`GetHealthMetrics`)
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE status = 'running'),
+  COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours'),
+  ...
+FROM workflow_runs
+WHERE tenant_id = $1;
+```
+
+Query ini single-pass aggregation — satu full scan dengan beberapa filter sekaligus, lebih efisien dari 4 query terpisah. `idx_workflow_runs_tenant` memotong rows yang di-scan dari seluruh tabel ke subset tenant saja:
+
+```
+Aggregate  (cost=18.40..18.41 rows=1 width=40)
+  ->  Index Scan using idx_workflow_runs_tenant on workflow_runs  (cost=0.28..15.90 rows=500 width=24)
+        Index Cond: (tenant_id = $1)
+```
+
+---
+
+### 3. Tag filtering (migration 002)
+
+`tags TEXT[]` pakai GIN index (`idx_workflow_tags`). Query `WHERE 'payment' = ANY(tags)` tanpa GIN → Seq Scan cost ~18. Dengan GIN → Bitmap Index Scan cost ~4. Detail ada di `migrations/002_add_tags.sql`.
 
 ## Project Structure
 

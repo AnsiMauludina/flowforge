@@ -9,6 +9,7 @@ import Layout from '@/components/layout/Layout'
 import Button from '@/components/ui/Button'
 import { useCreateWorkflow, useScheduleSuggestions } from '@/hooks/useWorkflows'
 import { generateWorkflowWithAI } from '@/services/api'
+import type { DAGDefinition } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -721,19 +722,20 @@ export default function CreateWorkflowPage() {
       dependencies: s.dependencies,
       config: stepToDAGConfig(s),
     }))
-    const dag: Record<string, unknown> = { steps: dagSteps }
+    const dag: DAGDefinition = { steps: dagSteps }
     if (timeoutSec && !isNaN(Number(timeoutSec))) dag.timeout = Number(timeoutSec)
 
     try {
       const workflow = await createMutation.mutateAsync({
         name: wfName,
         description,
-        dag: dag as any,
+        dag,
         ...(triggerType === 'cron' && cronExpression ? { cronExpression } : {}),
       })
       navigate(`/workflows/${workflow.id}`)
-    } catch (err: any) {
-      setGlobalError(err?.response?.data?.error || 'Failed to create workflow')
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } } }
+      setGlobalError(e?.response?.data?.error || 'Failed to create workflow')
     }
   }
 

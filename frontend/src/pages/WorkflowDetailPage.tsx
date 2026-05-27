@@ -38,13 +38,16 @@ export default function WorkflowDetailPage() {
   const triggerMutation = useTriggerWorkflow()
   const { stepRuns, activeRun } = useWorkflowStore()
 
-  // Sync the header status badge from the store — gets updated via WS run_complete events
+  // Sync the header status badge when the store's activeRun status changes (via WS run_complete).
   useEffect(() => {
-    if (!activeRun || !selectedRun) return
-    if (activeRun.id === selectedRun.id && activeRun.status !== selectedRun.status) {
-      setSelectedRun(prev => prev ? { ...prev, status: activeRun.status } : prev)
-    }
-  }, [activeRun?.id, activeRun?.status])
+    if (!activeRun) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedRun(prev =>
+      prev?.id === activeRun.id && prev.status !== activeRun.status
+        ? { ...prev, status: activeRun.status }
+        : prev
+    )
+  }, [activeRun?.id, activeRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTrigger = async () => {
     const optimisticRun: WorkflowRun = {
