@@ -29,13 +29,13 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
 
   setActiveRun: (run) => set({ activeRun: run, stepRuns: {} }),
 
-  updateStepRun: (stepRun) =>
+  updateStepRun: (stepRun) => {
+    // Guard: ignore entries with no valid step ID (would create phantom "undefined" entries)
+    if (!stepRun.stepId) return
     set((state) => ({
-      stepRuns: {
-        ...state.stepRuns,
-        [stepRun.stepId]: stepRun,
-      },
-    })),
+      stepRuns: { ...state.stepRuns, [stepRun.stepId]: stepRun },
+    }))
+  },
 
   setMetrics: (metrics) => set({ metrics }),
 

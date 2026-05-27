@@ -279,6 +279,46 @@ func (r *WorkflowRepository) GetVersions(
 	return versions, nil
 }
 
+// RollbackToVersion restores a workflow's DAG from a specific historical version.
+// The workflow version is incremented (the rollback itself is a new version).
+func (r *WorkflowRepository) RollbackToVersion(
+	ctx context.Context,
+	workflowID uuid.UUID,
+	tenantID uuid.UUID,
+	targetVersion int,
+) (*model.WorkflowDefinition, error) {
+	// Fetch the target version snapshot
+	var dagJSON string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT wv.dag
+		FROM workflow_versions wv
+		JOIN workflow_definitions wd ON wd.id = wv.workflow_id
+		WHERE wv.workflow_id = $1 AND wd.tenant_id = $2 AND wv.version = $3
+	`, workflowID, tenantID, targetVersion).Scan(&dagJSON)
+	if err != nil {
+		return nil, fmt.Errorf("version %d not found: %w", targetVersion, err)
+	}
+
+	var dag map[string]interface{}
+	if err := json.Unmarshal([]byte(dagJSON), &dag); err != nil {
+		return nil, fmt.Errorf("unmarshal version DAG: %w", err)
+	}
+
+	// Load the current workflow (for name, description, etc.)
+	wf, err := r.GetByID(ctx, workflowID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply the rolled-back DAG and increment version
+	wf.DAG = dag
+	if err := r.Update(ctx, wf); err != nil {
+		return nil, fmt.Errorf("save rollback: %w", err)
+	}
+
+	return wf, nil
+}
+
 // --- Runs ---
 
 func (r *WorkflowRepository) CreateRun(
@@ -430,6 +470,51 @@ func (r *WorkflowRepository) GetHealthMetrics(
 		AvgExecutionTime: avgDuration,
 		TotalRuns24h:     total24h,
 	}, nil
+}
+
+// GetStepRunsByRunID returns all step runs for a specific run, ordered by
+// started_at ASC (falls back to created_at). Tenant isolation is enforced
+// via a JOIN on workflow_runs.
+func (r *WorkflowRepository) GetStepRunsByRunID(
+	ctx context.Context,
+	runID uuid.UUID,
+	tenantID uuid.UUID,
+) ([]model.StepRun, error) {
+	query := `
+		SELECT sr.id, sr.run_id, sr.step_id, sr.step_name, sr.status,
+		       sr.attempt, sr.input, sr.output, sr.error,
+		       sr.started_at, sr.finished_at, sr.created_at
+		FROM step_runs sr
+		JOIN workflow_runs wr ON wr.id = sr.run_id
+		WHERE sr.run_id = $1 AND wr.tenant_id = $2
+		ORDER BY COALESCE(sr.started_at, sr.created_at) ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, runID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("get step runs: %w", err)
+	}
+	defer rows.Close()
+
+	var stepRuns []model.StepRun
+	for rows.Next() {
+		var sr model.StepRun
+		var inputJSON, outputJSON string
+		if err := rows.Scan(
+			&sr.ID, &sr.RunID, &sr.StepID, &sr.StepName, &sr.Status,
+			&sr.Attempt, &inputJSON, &outputJSON, &sr.Error,
+			&sr.StartedAt, &sr.FinishedAt, &sr.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan step run: %w", err)
+		}
+		if inputJSON != "" && inputJSON != "null" {
+			json.Unmarshal([]byte(inputJSON), &sr.Input)
+		}
+		if outputJSON != "" && outputJSON != "null" {
+			json.Unmarshal([]byte(outputJSON), &sr.Output)
+		}
+		stepRuns = append(stepRuns, sr)
+	}
+	return stepRuns, nil
 }
 
 // ListAllScheduled returns all active workflows that have a cron expression set,

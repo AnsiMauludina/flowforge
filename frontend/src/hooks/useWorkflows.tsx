@@ -154,21 +154,23 @@ export function useTriggerWorkflow() {
 
   return useMutation({
     mutationFn: async (workflowId: string) => {
-      const { data } = await api.post<{ data: { run_id: string } }>(
+      // After the camelCase response interceptor, backend's `run_id` arrives
+      // as `runId`. The TypeScript type must match what the interceptor produces.
+      const { data } = await api.post<{ data: { runId: string } }>(
         `/workflows/${workflowId}/trigger`
       )
       return data.data
     },
 
     onMutate: async (workflowId) => {
+      // Cancel any in-flight runs fetch to prevent it from overriding the
+      // optimistic entry. Empty-cache case is handled by `old ?? {...}` below.
       await qc.cancelQueries({ queryKey: ['runs', workflowId] })
 
-      // Snapshot current runs
       const snapshots = qc.getQueriesData<PaginatedResponse<WorkflowRun>>(
         { queryKey: ['runs', workflowId] }
       )
 
-      // Build a temporary run entry with a client-side id
       const optimisticRun: WorkflowRun = {
         id: `optimistic-${Date.now()}`,
         workflowId,
@@ -178,15 +180,17 @@ export function useTriggerWorkflow() {
         createdAt: new Date().toISOString(),
       }
 
-      // Prepend it to every cached page-1 result
+      // Handle both: already-cached data AND empty cache (old = undefined).
+      // Returning undefined from the updater is a no-op in React Query, so we
+      // must always return a valid object.
       qc.setQueriesData<PaginatedResponse<WorkflowRun>>(
         { queryKey: ['runs', workflowId] },
         (old) => {
-          if (!old) return old
+          const base = old ?? { data: [], total: 0, page: 1, limit: 20 }
           return {
-            ...old,
-            data: [optimisticRun, ...old.data],
-            total: old.total + 1,
+            ...base,
+            data: [optimisticRun, ...base.data],
+            total: base.total + 1,
           }
         }
       )
@@ -195,7 +199,8 @@ export function useTriggerWorkflow() {
     },
 
     onSuccess: (result, workflowId, ctx) => {
-      // Swap the placeholder id with the real run_id from the server
+      // Replace the optimistic placeholder with the real run_id from the server.
+      // `result.runId` is the camelCase form after the response interceptor.
       qc.setQueriesData<PaginatedResponse<WorkflowRun>>(
         { queryKey: ['runs', workflowId] },
         (old) => {
@@ -204,7 +209,7 @@ export function useTriggerWorkflow() {
             ...old,
             data: old.data.map((r) =>
               r.id === ctx.optimisticRun.id
-                ? { ...r, id: result.run_id, status: 'running' as const }
+                ? { ...r, id: result.runId, status: 'running' as const }
                 : r
             ),
           }
@@ -219,7 +224,38 @@ export function useTriggerWorkflow() {
     },
 
     onSettled: (_data, _err, workflowId) => {
-      qc.invalidateQueries({ queryKey: ['runs', workflowId] })
+      qc.refetchQueries({ queryKey: ['runs', workflowId] })
+    },
+  })
+}
+
+// Fetches all step runs for a completed or in-progress run from the REST API.
+// Used by LiveMonitor to hydrate historical runs that are no longer broadcasting
+// via WebSocket.
+export function useRunSteps(runId: string | undefined) {
+  return useQuery({
+    queryKey: ['run-steps', runId],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get<{ data: import('@/types').StepRun[] }>(
+          `/runs/${runId}/steps`
+        )
+        return data.data ?? []
+      } catch {
+        // Gracefully return empty on any error (e.g. 404 if backend is not yet
+        // restarted). The WebSocket store will still provide live updates.
+        return [] as import('@/types').StepRun[]
+      }
+    },
+    enabled: !!runId && runId !== '' && !runId.startsWith('optimistic-'),
+    // Refresh while the run is active; stop once all steps are terminal
+    refetchInterval: (query) => {
+      const steps = query.state.data
+      if (!steps?.length) return 3000
+      const allDone = steps.every(
+        (s) => s.status === 'success' || s.status === 'failed' || s.status === 'skipped'
+      )
+      return allDone ? false : 3000
     },
   })
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -274,6 +275,61 @@ func (h *Handler) GetWorkflowRuns(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// GetRunSteps returns all step runs for a specific workflow run.
+// GET /api/v1/runs/:run_id/steps
+func (h *Handler) GetRunSteps(c *gin.Context) {
+	tenantID, _ := parseUUID(appMiddleware.GetTenantID(c))
+	runID, err := parseUUID(c.Param("run_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "invalid run id"})
+		return
+	}
+
+	steps, err := h.workflowRepo.GetStepRunsByRunID(
+		c.Request.Context(), runID, tenantID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{Error: "failed to get step runs"})
+		return
+	}
+
+	successResponse(c, http.StatusOK, steps)
+}
+
+// RollbackWorkflow restores a workflow to a specific historical version.
+// POST /api/v1/workflows/:id/rollback/:version
+func (h *Handler) RollbackWorkflow(c *gin.Context) {
+	tenantID, _ := parseUUID(appMiddleware.GetTenantID(c))
+	workflowID, err := parseUUID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "invalid workflow id"})
+		return
+	}
+
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 {
+		c.JSON(http.StatusBadRequest, Response{Error: "invalid version number"})
+		return
+	}
+
+	wf, err := h.workflowRepo.RollbackToVersion(
+		c.Request.Context(), workflowID, tenantID, version,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "rollback failed: " + err.Error()})
+		return
+	}
+
+	// Re-register cron if the restored DAG was for a scheduled workflow
+	if h.scheduler != nil {
+		if wf.CronExpression != "" {
+			h.scheduler.Add(wf)
+		}
+	}
+
+	successResponse(c, http.StatusOK, wf)
 }
 
 func (h *Handler) GetHealthMetrics(c *gin.Context) {

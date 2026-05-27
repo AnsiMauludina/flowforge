@@ -28,7 +28,7 @@ function buildLayout(dag: DAGDefinition) {
   const inDegree: Record<string, number> = {}
   dag.steps.forEach((s) => { inDegree[s.id] = 0 })
   dag.steps.forEach((s) => {
-    s.dependencies.forEach((dep) => {
+    s.dependencies.forEach(() => {
       inDegree[s.id] = (inDegree[s.id] || 0) + 1
     })
   })

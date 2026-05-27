@@ -14,13 +14,13 @@ import (
 
 // StepResult holds the result of a step execution
 type StepResult struct {
-	StepID    string
-	Status    string
-	Output    map[string]interface{}
-	Error     string
-	StartedAt time.Time
-	FinishedAt time.Time
-	Attempt   int
+	StepID     string                 `json:"step_id"`
+	Status     string                 `json:"status"`
+	Output     map[string]interface{} `json:"output,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	StartedAt  time.Time              `json:"started_at"`
+	FinishedAt time.Time              `json:"finished_at"`
+	Attempt    int                    `json:"attempt"`
 }
 
 // StepExecutor executes a single step

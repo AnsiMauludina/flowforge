@@ -1,15 +1,16 @@
 interface BadgeProps {
-  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout' | 'cancelled'
+  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout' | 'cancelled' | 'skipped'
   label?: string
 }
 
-const statusConfig = {
-  pending:   { color: 'bg-gray-100 text-gray-500',    dot: 'bg-gray-400' },
-  running:   { color: 'bg-indigo-50 text-indigo-600', dot: 'bg-indigo-500 animate-pulse' },
+const statusConfig: Record<string, { color: string; dot: string }> = {
+  pending:   { color: 'bg-gray-100 text-gray-500',      dot: 'bg-gray-400' },
+  running:   { color: 'bg-indigo-50 text-indigo-600',   dot: 'bg-indigo-500 animate-pulse' },
   success:   { color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
-  failed:    { color: 'bg-red-50 text-red-600',       dot: 'bg-red-500' },
-  timeout:   { color: 'bg-amber-50 text-amber-600',   dot: 'bg-amber-500' },
-  cancelled: { color: 'bg-gray-100 text-gray-400',    dot: 'bg-gray-300' },
+  failed:    { color: 'bg-red-50 text-red-600',         dot: 'bg-red-500' },
+  timeout:   { color: 'bg-amber-50 text-amber-600',     dot: 'bg-amber-500' },
+  cancelled: { color: 'bg-gray-100 text-gray-400',      dot: 'bg-gray-300' },
+  skipped:   { color: 'bg-slate-100 text-slate-400',    dot: 'bg-slate-300' },
 }
 
 export default function Badge({ status, label }: BadgeProps) {

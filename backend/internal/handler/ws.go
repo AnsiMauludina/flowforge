@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -9,16 +11,28 @@ import (
 	appWS "github.com/AnsiMauludina/flowforge/internal/websocket"
 )
 
+// allowedOrigins returns the set of permitted WebSocket origins.
+// In development (ENV != production) we allow any localhost/127.0.0.1 origin.
+// In production, only the value of ALLOWED_ORIGIN env var is accepted.
+func allowedOrigin(origin string) bool {
+	if os.Getenv("ENV") != "production" {
+		// Allow any localhost or loopback origin, and empty Origin headers
+		// (sent by non-browser clients, curl, Postman, etc.)
+		return origin == "" ||
+			strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "https://localhost") ||
+			strings.HasPrefix(origin, "http://127.0.0.1") ||
+			strings.HasPrefix(origin, "https://127.0.0.1")
+	}
+	allowed := os.Getenv("ALLOWED_ORIGIN")
+	return allowed != "" && origin == allowed
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Allow all localhost origins in development.
-	// In production, restrict to the actual frontend domain.
 	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return origin == "http://localhost:3000" ||
-			origin == "http://localhost:5173" ||
-			origin == ""
+		return allowedOrigin(r.Header.Get("Origin"))
 	},
 }
 

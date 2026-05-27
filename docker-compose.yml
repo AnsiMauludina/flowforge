@@ -26,8 +26,9 @@ services:
     environment:
       DB_URL: postgres://flowforge:flowforge123@postgres:5432/flowforge?sslmode=disable
       REDIS_URL: redis:6379
-      JWT_SECRET: supersecretkey123
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ENV: development
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       - postgres
       - redis

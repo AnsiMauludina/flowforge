@@ -81,7 +81,7 @@ func main() {
 	}, logger)
 
 	// Init handler
-	h := handler.NewHandler(workflowRepo, webhookRepo, userRepo, cfg.JWTSecret, hub, sched)
+	h := handler.NewHandler(workflowRepo, webhookRepo, userRepo, cfg.JWTSecret, hub, sched, cfg)
 
 	// Wire the actual trigger function now that handler exists
 	triggerFn = func(wf *model.WorkflowDefinition, triggerType string) {
@@ -117,7 +117,7 @@ func main() {
 
 	// API v1
 	v1 := r.Group("/api/v1")
-	v1.Use(rateLimitMW) // apply to all /api/v1/* routes
+	v1.Use(rateLimitMW) // apply to all REST routes (excludes /ws below)
 
 	// Public routes
 	auth := v1.Group("/auth")
@@ -144,6 +144,11 @@ func main() {
 		protected.POST("/workflows/:id/trigger", h.TriggerWorkflow,
 			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
 		protected.GET("/workflows/:id/runs", h.GetWorkflowRuns)
+		protected.GET("/runs/:run_id/steps", h.GetRunSteps)
+
+		// Rollback workflow to a previous version
+		protected.POST("/workflows/:id/rollback/:version", h.RollbackWorkflow,
+			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
 
 		// Webhooks (management — requires auth)
 		protected.POST("/workflows/:id/webhooks", h.CreateWebhook,
@@ -151,6 +156,9 @@ func main() {
 		protected.GET("/workflows/:id/webhooks", h.ListWebhooks)
 		protected.DELETE("/webhooks/:webhook_id", h.DeleteWebhook,
 			appMiddleware.RequireRole(model.RoleAdmin, model.RoleEditor))
+
+		// AI-powered workflow generation
+		protected.POST("/ai/generate", h.GenerateWorkflowWithAI)
 
 		// Metrics
 		protected.GET("/metrics", h.GetHealthMetrics)
@@ -160,10 +168,11 @@ func main() {
 	// The caller authenticates via HMAC-SHA256 (X-Flowforge-Signature header).
 	v1.POST("/webhooks/:webhook_id/trigger", h.ReceiveWebhook)
 
-	// WebSocket — outside protected group because browsers cannot send
-	// Authorization headers during the WebSocket upgrade handshake.
-	// Token is validated via ?token= query param inside ServeWS.
-	v1.GET("/ws", h.ServeWS)
+	// WebSocket — registered on the raw router (NOT inside the v1 rate-limited
+	// group) so the upgrade request is never counted against the per-IP limit.
+	// Browsers cannot send Authorization headers during the WebSocket upgrade
+	// handshake; JWT is validated via ?token= query param inside ServeWS.
+	r.GET("/api/v1/ws", h.ServeWS)
 
 	// Server
 	srv := &http.Server{

@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/AnsiMauludina/flowforge/config"
 	"github.com/AnsiMauludina/flowforge/internal/repository"
 	"github.com/AnsiMauludina/flowforge/internal/scheduler"
 )
@@ -15,6 +16,7 @@ type Handler struct {
 	validate     *validator.Validate
 	hub          WebSocketHub
 	scheduler    *scheduler.Scheduler
+	cfg          *config.Config
 }
 
 type WebSocketHub interface {
@@ -28,6 +30,7 @@ func NewHandler(
 	jwtSecret string,
 	hub WebSocketHub,
 	sched *scheduler.Scheduler,
+	cfg *config.Config,
 ) *Handler {
 	return &Handler{
 		workflowRepo: workflowRepo,
@@ -37,6 +40,7 @@ func NewHandler(
 		validate:     validator.New(),
 		hub:          hub,
 		scheduler:    sched,
+		cfg:          cfg,
 	}
 }
 

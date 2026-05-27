@@ -1,6 +1,29 @@
 import type { WSMessage, StepRun, WorkflowRun } from '@/types'
 import { useWorkflowStore } from '@/store/workflowStore'
 
+// ─── camelizeKeys ─────────────────────────────────────────────────────────────
+// WebSocket messages are NOT processed by the axios interceptor, so we need to
+// convert snake_case / PascalCase keys ourselves before touching the store.
+function camelize(s: string): string {
+  // Handle both snake_case  (step_id → stepId)
+  // and PascalCase          (StepID → stepID, then stepId via first-char lower)
+  const snake = s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
+  return snake.charAt(0).toLowerCase() + snake.slice(1)
+}
+
+function camelizeKeys(obj: unknown): unknown {
+  if (Array.isArray(obj)) return obj.map(camelizeKeys)
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
+        camelize(k),
+        camelizeKeys(v),
+      ])
+    )
+  }
+  return obj
+}
+
 class WebSocketService {
   private ws: WebSocket | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -8,12 +31,9 @@ class WebSocketService {
   private maxReconnectDelay = 30000
   private currentToken = ''
   private currentRunID: string | undefined
-  // Flag to distinguish intentional close (disconnect()) from network drop.
-  // Prevents scheduleReconnect() from firing after an explicit disconnect.
   private intentionalClose = false
 
   connect(token: string, runID?: string) {
-    // If already connected to the same target, skip re-connecting
     if (
       this.ws?.readyState === WebSocket.OPEN &&
       this.currentToken === token &&
@@ -26,7 +46,6 @@ class WebSocketService {
     this.currentToken = token
     this.currentRunID = runID
 
-    // Close any existing socket cleanly before opening a new one
     if (this.ws) {
       this.intentionalClose = true
       this.ws.close()
@@ -49,7 +68,10 @@ class WebSocketService {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg: WSMessage = JSON.parse(event.data)
+        const raw = JSON.parse(event.data)
+        // camelizeKeys converts snake_case and PascalCase field names from the
+        // Go backend (e.g. step_id → stepId, StepID → stepId, run_id → runId)
+        const msg = camelizeKeys(raw) as WSMessage
         this.handleMessage(msg)
       } catch {
         // ignore malformed frames
@@ -57,14 +79,13 @@ class WebSocketService {
     }
 
     this.ws.onclose = () => {
-      // Only reconnect on unintentional closes (network drop, server restart)
       if (!this.intentionalClose) {
         this.scheduleReconnect()
       }
     }
 
     this.ws.onerror = () => {
-      // onerror always precedes onclose; let onclose handle reconnect logic
+      // onerror always precedes onclose; let onclose handle reconnect
     }
   }
 
@@ -72,9 +93,14 @@ class WebSocketService {
     const store = useWorkflowStore.getState()
 
     switch (msg.type) {
-      case 'step_update':
-        store.updateStepRun(msg.data as StepRun)
+      case 'step_update': {
+        const step = msg.data as StepRun
+        // Ignore phantom entries that have no valid step ID
+        if (step.stepId) {
+          store.updateStepRun(step)
+        }
         break
+      }
       case 'run_update':
         if (store.activeRun?.id === msg.runId) {
           store.setActiveRun({
@@ -84,10 +110,12 @@ class WebSocketService {
         }
         break
       case 'run_complete':
-        store.setActiveRun({
-          ...store.activeRun!,
-          status: (msg.data as WorkflowRun).status,
-        })
+        if (store.activeRun) {
+          store.setActiveRun({
+            ...store.activeRun,
+            status: (msg.data as WorkflowRun).status,
+          })
+        }
         break
     }
   }
@@ -106,7 +134,6 @@ class WebSocketService {
   }
 
   disconnect() {
-    // Mark as intentional BEFORE closing so onclose doesn't trigger reconnect
     this.intentionalClose = true
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
