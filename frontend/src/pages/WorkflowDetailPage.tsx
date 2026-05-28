@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Play, Pencil, MoreHorizontal, CheckCircle2, XCircle, Loader2,
@@ -522,6 +522,22 @@ export default function WorkflowDetailPage() {
   // Runs tab state
   const [runsStatusFilter, setRunsStatusFilter] = useState('')
   const [runDetailTab, setRunDetailTab]   = useState<'summary' | 'step-results'>('summary')
+
+  // Wrapper handlers that co-locate related state resets (avoids setState-in-effect)
+  const handleSelectRun = useCallback((run: WorkflowRun | null) => {
+    setSelectedRun(run)
+    setRunDetailTab('summary')
+  }, [])
+
+  const handleSetFilter = useCallback((filter: string) => {
+    setRunsStatusFilter(filter)
+    setRunsPage(1)
+  }, [])
+
+  const handleSetPerPage = useCallback((perPage: 10 | 20 | 50) => {
+    setRunsPerPage(perPage)
+    setRunsPage(1)
+  }, [])
   const [copiedRunId, setCopiedRunId]     = useState(false)
 
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
@@ -550,12 +566,6 @@ export default function WorkflowDetailPage() {
     return () => setActiveRun(null)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRun?.id])
-
-  // Reset page on filter/per-page change
-  useEffect(() => { setRunsPage(1) }, [runsStatusFilter, runsPerPage])
-
-  // Reset runDetailTab when run changes
-  useEffect(() => { setRunDetailTab('summary') }, [selectedRun?.id])
 
   const handleTrigger = async () => {
     try {
@@ -764,8 +774,8 @@ export default function WorkflowDetailPage() {
                 runs={runs}
                 total={totalRuns}
                 selectedRunId={selectedRun?.id}
-                onSelectRun={setSelectedRun}
-                onClear={() => setSelectedRun(null)}
+                onSelectRun={handleSelectRun}
+                onClear={() => handleSelectRun(null)}
                 onViewAll={() => setActiveTab('runs')}
               />
 
@@ -784,7 +794,7 @@ export default function WorkflowDetailPage() {
                     <div
                       key={run.id}
                       className="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-gray-50/50 transition-colors"
-                      onClick={() => setSelectedRun(run)}
+                      onClick={() => handleSelectRun(run)}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <Badge status={run.status} />
@@ -843,7 +853,7 @@ export default function WorkflowDetailPage() {
                   <div className="flex items-center gap-2 mt-3">
                     <select
                       value={runsStatusFilter}
-                      onChange={e => setRunsStatusFilter(e.target.value)}
+                      onChange={e => handleSetFilter(e.target.value)}
                       className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 cursor-pointer"
                     >
                       <option value="">Status</option>
@@ -888,7 +898,7 @@ export default function WorkflowDetailPage() {
                       ) : filteredRuns.map(run => (
                         <tr
                           key={run.id}
-                          onClick={() => setSelectedRun(run)}
+                          onClick={() => handleSelectRun(run)}
                           className={`cursor-pointer hover:bg-gray-50/70 transition-colors ${
                             selectedRun?.id === run.id ? 'bg-indigo-50/40 border-l-2 border-l-indigo-400' : ''
                           }`}
@@ -969,7 +979,7 @@ export default function WorkflowDetailPage() {
 
                   <select
                     value={runsPerPage}
-                    onChange={e => setRunsPerPage(Number(e.target.value) as 10 | 20 | 50)}
+                    onChange={e => handleSetPerPage(Number(e.target.value) as 10 | 20 | 50)}
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-500 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 cursor-pointer"
                   >
                     {PER_PAGE_OPTIONS.map(n => (
@@ -994,7 +1004,7 @@ export default function WorkflowDetailPage() {
                     <div className="flex items-center gap-2">
                       <Badge status={selectedRun.status} />
                       <button
-                        onClick={() => setSelectedRun(null)}
+                        onClick={() => handleSelectRun(null)}
                         className="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all"
                       >
                         <X className="w-3.5 h-3.5" />

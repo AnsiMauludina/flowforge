@@ -684,23 +684,28 @@ export default function CreateWorkflowPage() {
   const [showAI, setShowAI]               = useState(false)
   const [globalError, setGlobalError]     = useState<string | null>(null)
 
-  // Pre-populate form when editing an existing workflow
-  useEffect(() => {
-    if (!isEdit || !existingWorkflow) return
-    setWfName(existingWorkflow.name)
-    setDescription(existingWorkflow.description ?? '')
-    if (existingWorkflow.cronExpression) {
+  // Pre-populate form from existing workflow data (called from effect below)
+  const applyWorkflow = useCallback((wf: import('@/types').WorkflowDefinition) => {
+    setWfName(wf.name)
+    setDescription(wf.description ?? '')
+    if (wf.cronExpression) {
       setTriggerType('cron')
-      setCronExpression(existingWorkflow.cronExpression)
+      setCronExpression(wf.cronExpression)
     } else {
       setTriggerType('manual')
       setCronExpression('')
     }
-    setTimeoutSec(existingWorkflow.dag?.timeout ? String(existingWorkflow.dag.timeout) : '')
-    if (existingWorkflow.dag?.steps?.length) {
-      setSteps(existingWorkflow.dag.steps.map(s => dagStepToForm(s as unknown as Record<string, unknown>)))
+    setTimeoutSec(wf.dag?.timeout ? String(wf.dag.timeout) : '')
+    if (wf.dag?.steps?.length) {
+      setSteps(wf.dag.steps.map(s => dagStepToForm(s as unknown as Record<string, unknown>)))
       setSelectedNode('trigger')
     }
+  }, [])
+
+  useEffect(() => {
+    if (!isEdit || !existingWorkflow) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    applyWorkflow(existingWorkflow)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingWorkflow?.id])
 
