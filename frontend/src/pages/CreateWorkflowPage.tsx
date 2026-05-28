@@ -1,19 +1,20 @@
-import { useState, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Plus, Trash2, AlertCircle, Globe, Terminal,
   Timer, GitBranch, Play, CalendarClock, Webhook, Sparkles,
-  ChevronDown, X, CheckCircle2, Loader2,
+  ChevronDown, X, CheckCircle2, Loader2, Braces,
 } from 'lucide-react'
 import Layout from '@/components/layout/Layout'
 import Button from '@/components/ui/Button'
-import { useCreateWorkflow, useScheduleSuggestions } from '@/hooks/useWorkflows'
+import Spinner from '@/components/ui/Spinner'
+import { useCreateWorkflow, useUpdateWorkflow, useWorkflow, useScheduleSuggestions } from '@/hooks/useWorkflows'
 import { generateWorkflowWithAI } from '@/services/api'
 import type { DAGDefinition } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type StepType = 'http' | 'script' | 'delay' | 'condition'
+type StepType = 'http' | 'script' | 'javascript' | 'delay' | 'condition'
 type TriggerType = 'manual' | 'cron' | 'webhook'
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
 
@@ -28,6 +29,7 @@ interface StepForm {
   httpHeaders: HeaderPair[]
   httpBody: string
   scriptCode: string
+  jsCode: string
   delayDuration: string
   conditionExpr: string
 }
@@ -35,10 +37,11 @@ interface StepForm {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STEP_TYPE_META: Record<StepType, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
-  http:      { label: 'HTTP Request', icon: <Globe className="w-4 h-4" />,      color: 'text-blue-600',   bg: 'bg-blue-100'   },
-  script:    { label: 'Run Script',   icon: <Terminal className="w-4 h-4" />,   color: 'text-purple-600', bg: 'bg-purple-100' },
-  delay:     { label: 'Wait / Delay', icon: <Timer className="w-4 h-4" />,      color: 'text-amber-600',  bg: 'bg-amber-100'  },
-  condition: { label: 'Condition',    icon: <GitBranch className="w-4 h-4" />,  color: 'text-emerald-600',bg: 'bg-emerald-100'},
+  http:       { label: 'HTTP Request',  icon: <Globe className="w-4 h-4" />,      color: 'text-blue-600',    bg: 'bg-blue-100'    },
+  script:     { label: 'Run Script',    icon: <Terminal className="w-4 h-4" />,   color: 'text-purple-600',  bg: 'bg-purple-100'  },
+  javascript: { label: 'JavaScript',    icon: <Braces className="w-4 h-4" />,     color: 'text-yellow-600',  bg: 'bg-yellow-100'  },
+  delay:      { label: 'Wait / Delay',  icon: <Timer className="w-4 h-4" />,      color: 'text-amber-600',   bg: 'bg-amber-100'   },
+  condition:  { label: 'Condition',     icon: <GitBranch className="w-4 h-4" />,  color: 'text-emerald-600', bg: 'bg-emerald-100' },
 }
 
 const TRIGGER_META: Record<TriggerType, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
@@ -56,6 +59,7 @@ const DEFAULT_STEP: StepForm = {
   httpHeaders: [],
   httpBody: '',
   scriptCode: 'echo "Processing..."',
+  jsCode: 'const result = { processed: true, timestamp: new Date().toISOString() };\nconsole.log(JSON.stringify(result));',
   delayDuration: '5s',
   conditionExpr: '${status} == 200',
 }
@@ -76,9 +80,10 @@ function stepToDAGConfig(step: StepForm): Record<string, unknown> {
       }
       return config
     }
-    case 'script':    return { code: step.scriptCode }
-    case 'delay':     return { duration: step.delayDuration }
-    case 'condition': return { expression: step.conditionExpr }
+    case 'script':     return { code: step.scriptCode }
+    case 'javascript': return { code: step.jsCode }
+    case 'delay':      return { duration: step.delayDuration }
+    case 'condition':  return { expression: step.conditionExpr }
   }
 }
 
@@ -95,9 +100,10 @@ function dagStepToForm(step: Record<string, unknown>): StepForm {
       }
       if (cfg.body) base.httpBody = JSON.stringify(cfg.body, null, 2)
       break
-    case 'script':    base.scriptCode    = String(cfg.code ?? '') ; break
-    case 'delay':     base.delayDuration = String(cfg.duration ?? '5s') ; break
-    case 'condition': base.conditionExpr = String(cfg.expression ?? '') ; break
+    case 'script':     base.scriptCode    = String(cfg.code ?? '') ; break
+    case 'javascript': base.jsCode        = String(cfg.code ?? '') ; break
+    case 'delay':      base.delayDuration = String(cfg.duration ?? '5s') ; break
+    case 'condition':  base.conditionExpr = String(cfg.expression ?? '') ; break
   }
   return base
 }
@@ -151,10 +157,11 @@ function StepNodeCard({
 
       {/* Brief summary line */}
       <div className="mt-2 ml-12 text-xs text-gray-400 truncate">
-        {step.type === 'http' && (step.httpUrl || '—')}
-        {step.type === 'script' && (step.scriptCode.split('\n')[0] || '—')}
-        {step.type === 'delay' && `Wait ${step.delayDuration}`}
-        {step.type === 'condition' && (step.conditionExpr || '—')}
+        {step.type === 'http'       && (step.httpUrl || '—')}
+        {step.type === 'script'     && (step.scriptCode.split('\n')[0] || '—')}
+        {step.type === 'javascript' && (step.jsCode.split('\n')[0] || '—')}
+        {step.type === 'delay'      && `Wait ${step.delayDuration}`}
+        {step.type === 'condition'  && (step.conditionExpr || '—')}
       </div>
 
       {/* Step ID chip */}
@@ -510,6 +517,29 @@ function StepConfigPanel({
           <p className="mt-1 text-xs text-gray-400">Input values are passed as environment variables: INPUT_KEY=value</p>
         </div>
       )}
+      {step.type === 'javascript' && (
+        <div className="space-y-3">
+          <div>
+            <label className={labelCls}>JavaScript (Node.js)</label>
+            <textarea
+              value={step.jsCode}
+              onChange={e => onChange({ jsCode: e.target.value })}
+              className={`${inputCls} font-mono text-xs resize-none`}
+              rows={8}
+              spellCheck={false}
+              placeholder={'// OUTPUT dari step sebelumnya tersedia via INPUT\nconst result = { processed: true };\nconsole.log(JSON.stringify(result));'}
+            />
+          </div>
+          <div className="rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 space-y-1.5">
+            <p className="text-[10px] font-semibold text-yellow-700 uppercase tracking-wide">Cara Akses Output Step Sebelumnya</p>
+            <p className="text-xs text-yellow-700">• <code className="font-mono bg-yellow-100 px-1 rounded">INPUT["step_id"]</code> — output dari step tertentu</p>
+            <p className="text-xs text-yellow-700">• <code className="font-mono bg-yellow-100 px-1 rounded">step_id</code> — shortcut variabel otomatis (nama step_id langsung)</p>
+            <p className="text-xs text-yellow-700">• <code className="font-mono bg-yellow-100 px-1 rounded">process.env.INPUT_STEP_ID</code> — versi JSON string via env var</p>
+            <p className="text-xs text-yellow-700">• <code className="font-mono bg-yellow-100 px-1 rounded">console.log(JSON.stringify(...))</code> untuk output ke step berikutnya</p>
+            <p className="text-xs text-yellow-700">• Dijalankan via <code className="font-mono bg-yellow-100 px-1 rounded">node</code> — pastikan Node.js tersedia di server</p>
+          </div>
+        </div>
+      )}
       {step.type === 'delay'     && (
         <div>
           <label className={labelCls}>Duration</label>
@@ -632,7 +662,14 @@ function AIGenerateModal({
 
 export default function CreateWorkflowPage() {
   const navigate = useNavigate()
+  const { id }   = useParams<{ id: string }>()
+  const isEdit   = !!id
+
   const createMutation = useCreateWorkflow()
+  const updateMutation = useUpdateWorkflow(id ?? '')
+
+  // In edit mode: fetch existing workflow to pre-populate
+  const { data: existingWorkflow, isLoading: isLoadingExisting } = useWorkflow(id ?? '')
 
   // Workflow metadata
   const [wfName, setWfName]               = useState('')
@@ -647,6 +684,26 @@ export default function CreateWorkflowPage() {
   const [showAI, setShowAI]               = useState(false)
   const [globalError, setGlobalError]     = useState<string | null>(null)
 
+  // Pre-populate form when editing an existing workflow
+  useEffect(() => {
+    if (!isEdit || !existingWorkflow) return
+    setWfName(existingWorkflow.name)
+    setDescription(existingWorkflow.description ?? '')
+    if (existingWorkflow.cronExpression) {
+      setTriggerType('cron')
+      setCronExpression(existingWorkflow.cronExpression)
+    } else {
+      setTriggerType('manual')
+      setCronExpression('')
+    }
+    setTimeoutSec(existingWorkflow.dag?.timeout ? String(existingWorkflow.dag.timeout) : '')
+    if (existingWorkflow.dag?.steps?.length) {
+      setSteps(existingWorkflow.dag.steps.map(s => dagStepToForm(s as unknown as Record<string, unknown>)))
+      setSelectedNode('trigger')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingWorkflow?.id])
+
   const stepIds = useMemo(() => steps.map(s => makeId(s.name)), [steps])
 
   // ── Validation ──
@@ -660,10 +717,11 @@ export default function CreateWorkflowPage() {
         if (!stepIds.includes(dep)) errs.push(`Dependency "${dep}" no longer exists`)
         if (dep === id) errs.push('Step cannot depend on itself')
       })
-      if (steps[i].type === 'http' && !steps[i].httpUrl) errs.push('URL is required')
-      if (steps[i].type === 'script' && !steps[i].scriptCode) errs.push('Script code is required')
-      if (steps[i].type === 'delay' && !steps[i].delayDuration) errs.push('Duration is required')
-      if (steps[i].type === 'condition' && !steps[i].conditionExpr) errs.push('Expression is required')
+      if (steps[i].type === 'http'       && !steps[i].httpUrl)       errs.push('URL is required')
+      if (steps[i].type === 'script'     && !steps[i].scriptCode)   errs.push('Script code is required')
+      if (steps[i].type === 'javascript' && !steps[i].jsCode)        errs.push('JavaScript code is required')
+      if (steps[i].type === 'delay'      && !steps[i].delayDuration) errs.push('Duration is required')
+      if (steps[i].type === 'condition'  && !steps[i].conditionExpr) errs.push('Expression is required')
       if (errs.length) errors[i] = errs
     })
     return errors
@@ -725,46 +783,72 @@ export default function CreateWorkflowPage() {
     const dag: DAGDefinition = { steps: dagSteps }
     if (timeoutSec && !isNaN(Number(timeoutSec))) dag.timeout = Number(timeoutSec)
 
+    const payload = {
+      name: wfName,
+      description,
+      dag,
+      ...(triggerType === 'cron' && cronExpression ? { cronExpression } : { cronExpression: '' }),
+    }
+
     try {
-      const workflow = await createMutation.mutateAsync({
-        name: wfName,
-        description,
-        dag,
-        ...(triggerType === 'cron' && cronExpression ? { cronExpression } : {}),
-      })
-      navigate(`/workflows/${workflow.id}`)
+      if (isEdit) {
+        await updateMutation.mutateAsync(payload)
+        navigate(`/workflows/${id}`)
+      } else {
+        const workflow = await createMutation.mutateAsync(payload)
+        navigate(`/workflows/${workflow.id}`)
+      }
     } catch (err) {
       const e = err as { response?: { data?: { error?: string } } }
-      setGlobalError(e?.response?.data?.error || 'Failed to create workflow')
+      setGlobalError(e?.response?.data?.error || (isEdit ? 'Failed to update workflow' : 'Failed to create workflow'))
     }
   }
 
   const selectedStepIdx = selectedNode === 'trigger' ? null : (selectedNode as number)
   const selectedStep    = selectedStepIdx !== null ? steps[selectedStepIdx] : null
+  const isBusy          = createMutation.isPending || updateMutation.isPending
+
+  // Show spinner while fetching existing workflow in edit mode
+  if (isEdit && isLoadingExisting) {
+    return (
+      <Layout title="Edit Workflow">
+        <div className="flex justify-center py-24"><Spinner size="lg" /></div>
+      </Layout>
+    )
+  }
 
   return (
-    <Layout title="New Workflow">
+    <Layout title={isEdit ? 'Edit Workflow' : 'New Workflow'}>
       <form onSubmit={handleSubmit}>
         {/* Top bar */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => navigate('/workflows')}
+              onClick={() => navigate(isEdit ? `/workflows/${id}` : '/workflows')}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <h2 className="text-base font-semibold text-gray-900">New Workflow</h2>
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">
+                {isEdit ? 'Edit Workflow' : 'New Workflow'}
+              </h2>
+              {isEdit && existingWorkflow && (
+                <p className="text-xs text-gray-400 mt-0.5">{existingWorkflow.name} · v{existingWorkflow.version}</p>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setShowAI(true)}>
               <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
               AI Generate
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => navigate('/workflows')}>Cancel</Button>
-            <Button type="submit" size="sm" loading={createMutation.isPending} disabled={hasErrors || !wfName}>
-              Create Workflow
+            <Button type="button" variant="secondary" size="sm" onClick={() => navigate(isEdit ? `/workflows/${id}` : '/workflows')}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" loading={isBusy} disabled={hasErrors || !wfName}>
+              {isEdit ? 'Save Changes' : 'Create Workflow'}
             </Button>
           </div>
         </div>
@@ -827,6 +911,7 @@ export default function CreateWorkflowPage() {
                 triggerType={triggerType} setTriggerType={setTriggerType}
                 cronExpression={cronExpression} setCronExpression={setCronExpression}
                 timeoutSec={timeoutSec} setTimeoutSec={setTimeoutSec}
+                workflowId={id}
               />
             ) : selectedStep ? (
               <StepConfigPanel

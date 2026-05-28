@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'editor' | 'viewer'
-export type StepType = 'http' | 'script' | 'delay' | 'condition'
+export type StepType = 'http' | 'script' | 'javascript' | 'delay' | 'condition'
 export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'timeout' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped'
 export type TriggerType = 'manual' | 'scheduled' | 'webhook'

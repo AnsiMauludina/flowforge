@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -47,6 +48,8 @@ func (se *StepExecutor) Execute(
 		output, err = executeHTTPStep(ctx, step, input)
 	case StepTypeScript:
 		output, err = executeScriptStep(ctx, step, input)
+	case StepTypeJavaScript:
+		output, err = executeJavaScriptStep(ctx, step, input)
 	case StepTypeDelay:
 		output, err = executeDelayStep(ctx, step)
 	case StepTypeCondition:
@@ -141,10 +144,14 @@ func executeScriptStep(
 	// Security: only allow bash scripts, no shell injection
 	cmd := exec.CommandContext(ctx, "bash", "-c", code)
 
-	// Pass input as env vars
+	// Pass each dependency step output as INPUT_<STEP_ID> env var (JSON-encoded)
 	for k, v := range input {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%v",
-			strings.ToUpper(k), v))
+		jsonVal, err := json.Marshal(v)
+		if err != nil {
+			jsonVal = []byte("{}")
+		}
+		cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s",
+			strings.ToUpper(k), string(jsonVal)))
 	}
 
 	out, err := cmd.CombinedOutput()
@@ -154,6 +161,74 @@ func executeScriptStep(
 
 	return map[string]interface{}{
 		"output": string(out),
+		"exit_code": 0,
+	}, nil
+}
+
+func executeJavaScriptStep(
+	ctx context.Context,
+	step *StepDefinition,
+	input map[string]interface{},
+) (map[string]interface{}, error) {
+	code, ok := step.Config["code"].(string)
+	if !ok || code == "" {
+		return nil, fmt.Errorf("javascript step '%s' missing 'code' in config", step.ID)
+	}
+
+	// Build wrapper: expose INPUT global + per-step shortcuts
+	// INPUT["step_id"] → full output object of that step
+	inputJSON, _ := json.Marshal(input)
+
+	// Build per-step shortcut lines: const fetch_foo = INPUT["fetch_foo"];
+	stepShortcuts := ""
+	for k := range input {
+		stepShortcuts += fmt.Sprintf("const %s = INPUT[%q];\n", k, k)
+	}
+
+	wrapper := fmt.Sprintf(
+		"const INPUT = JSON.parse(process.env.INPUT_JSON || '{}');\n%s%s",
+		stepShortcuts, code,
+	)
+
+	tmpFile, err := os.CreateTemp("", "flowforge-js-*.js")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(wrapper); err != nil {
+		tmpFile.Close()
+		return nil, fmt.Errorf("failed to write script: %w", err)
+	}
+	tmpFile.Close()
+
+	// Pass full input as INPUT_JSON + individual step outputs as INPUT_<STEP_ID>
+	envVars := append(os.Environ(), fmt.Sprintf("INPUT_JSON=%s", string(inputJSON)))
+	for k, v := range input {
+		jsonVal, err := json.Marshal(v)
+		if err != nil {
+			jsonVal = []byte("{}")
+		}
+		envVars = append(envVars, fmt.Sprintf("INPUT_%s=%s", strings.ToUpper(k), string(jsonVal)))
+	}
+
+	cmd := exec.CommandContext(ctx, "node", tmpFile.Name())
+	cmd.Env = envVars
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("javascript failed: %w — output: %s", err, string(out))
+	}
+
+	// Try to parse stdout as JSON; fall back to plain string
+	trimmed := strings.TrimSpace(string(out))
+	var parsed interface{}
+	if jsonErr := json.Unmarshal([]byte(trimmed), &parsed); jsonErr != nil {
+		parsed = trimmed
+	}
+
+	return map[string]interface{}{
+		"output":    parsed,
 		"exit_code": 0,
 	}, nil
 }

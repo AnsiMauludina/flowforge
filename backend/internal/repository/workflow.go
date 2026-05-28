@@ -347,9 +347,13 @@ func (r *WorkflowRepository) UpdateRunStatus(
 	startedAt *time.Time,
 	finishedAt *time.Time,
 ) error {
+	// COALESCE preserves the existing value when the incoming pointer is nil.
+	// This prevents the "running → finished" update from overwriting started_at back to NULL.
 	query := `
 		UPDATE workflow_runs
-		SET status = $1, started_at = $2, finished_at = $3
+		SET status     = $1,
+		    started_at  = COALESCE($2, started_at),
+		    finished_at = COALESCE($3, finished_at)
 		WHERE id = $4
 	`
 	_, err := r.db.ExecContext(ctx, query, status, startedAt, finishedAt, runID)
@@ -413,7 +417,7 @@ func (r *WorkflowRepository) GetRunsByWorkflow(
 	}
 	defer rows.Close()
 
-	var runs []model.WorkflowRun
+	runs := make([]model.WorkflowRun, 0)
 	for rows.Next() {
 		var run model.WorkflowRun
 		rows.Scan(

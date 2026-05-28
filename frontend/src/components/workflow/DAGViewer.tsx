@@ -135,20 +135,13 @@ export default function DAGViewer({ dag, stepRuns = {} }: DAGViewerProps) {
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
-      proOptions={{ hideAttribution: true }}
+      proOptions={{ 
+        hideAttribution: true
+      }}
+
     >
       <Background color="#e2e8f0" gap={20} />
       <Controls showInteractive={false} />
-      <MiniMap
-        nodeColor={(n) => {
-          const status = n.data?.status as string
-          if (status === 'success') return '#22c55e'
-          if (status === 'failed')  return '#ef4444'
-          if (status === 'running') return '#3b82f6'
-          return '#94a3b8'
-        }}
-        style={{ borderRadius: 8 }}
-      />
     </ReactFlow>
   )
 }

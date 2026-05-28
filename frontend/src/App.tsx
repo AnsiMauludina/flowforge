@@ -54,6 +54,14 @@ export default function App() {
             }
           />
           <Route
+            path="/workflows/:id/edit"
+            element={
+              <PrivateRoute>
+                <CreateWorkflowPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/workflows/:id"
             element={
               <PrivateRoute>

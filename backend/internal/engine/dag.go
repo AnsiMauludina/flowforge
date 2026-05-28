@@ -9,10 +9,11 @@ import (
 type StepType string
 
 const (
-	StepTypeHTTP      StepType = "http"
-	StepTypeScript    StepType = "script"
-	StepTypeDelay     StepType = "delay"
-	StepTypeCondition StepType = "condition"
+	StepTypeHTTP       StepType = "http"
+	StepTypeScript     StepType = "script"
+	StepTypeJavaScript StepType = "javascript"
+	StepTypeDelay      StepType = "delay"
+	StepTypeCondition  StepType = "condition"
 )
 
 // RetryConfig holds retry settings for a step
@@ -163,7 +164,7 @@ func (d *DAG) Validate() error {
 
 func isValidStepType(t StepType) bool {
 	switch t {
-	case StepTypeHTTP, StepTypeScript, StepTypeDelay, StepTypeCondition:
+	case StepTypeHTTP, StepTypeScript, StepTypeJavaScript, StepTypeDelay, StepTypeCondition:
 		return true
 	}
 	return false
@@ -178,6 +179,10 @@ func validateStepConfig(step *StepDefinition) error {
 	case StepTypeScript:
 		if _, ok := step.Config["code"]; !ok {
 			return fmt.Errorf("script step '%s' missing 'code' in config", step.ID)
+		}
+	case StepTypeJavaScript:
+		if _, ok := step.Config["code"]; !ok {
+			return fmt.Errorf("javascript step '%s' missing 'code' in config", step.ID)
 		}
 	case StepTypeDelay:
 		if _, ok := step.Config["duration"]; !ok {

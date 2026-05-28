@@ -78,6 +78,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation, n
 Step types and their required config keys:
 - "http": config must have "url" (string) and optionally "method" (GET/POST/PUT/DELETE), "headers" (object), "body" (object)
 - "script": config must have "code" (bash script string, e.g. "echo 'processing...'")
+- "javascript": config must have "code" (Node.js script string; INPUT global contains previous step output, e.g. "console.log(INPUT.output)")
 - "delay": config must have "duration" (e.g. "5s", "1m", "30s")
 - "condition": config must have "expression" (e.g. "${status} == 200" or "${response.active} == true")
 

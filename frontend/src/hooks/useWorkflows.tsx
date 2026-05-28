@@ -262,17 +262,47 @@ export function useRunSteps(runId: string | undefined) {
   })
 }
 
-export function useWorkflowRuns(workflowId: string, page = 1) {
+export function useWorkflowRuns(workflowId: string, page = 1, limit = 20) {
   return useQuery({
-    queryKey: ['runs', workflowId, page],
+    queryKey: ['runs', workflowId, page, limit],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<WorkflowRun>>(
-        `/workflows/${workflowId}/runs?page=${page}&limit=20`
+        `/workflows/${workflowId}/runs?page=${page}&limit=${limit}`
       )
       return data
     },
     enabled: !!workflowId && workflowId !== 'new',
     refetchInterval: 5000,
+  })
+}
+
+export function useWorkflowVersions(id: string) {
+  return useQuery({
+    queryKey: ['workflow-versions', id],
+    queryFn: async () => {
+      const { data } = await api.get<{ data: import('@/types').WorkflowVersion[] }>(
+        `/workflows/${id}/versions`
+      )
+      return data.data ?? []
+    },
+    enabled: !!id && id !== 'new',
+  })
+}
+
+export function useRollbackWorkflow(workflowId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (version: number) => {
+      const { data } = await api.post<{ data: import('@/types').WorkflowDefinition }>(
+        `/workflows/${workflowId}/rollback/${version}`
+      )
+      return data.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workflow', workflowId] })
+      qc.invalidateQueries({ queryKey: ['workflow-versions', workflowId] })
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+    },
   })
 }
 
